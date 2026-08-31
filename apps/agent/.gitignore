@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Database & Environments
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.local
+.env.*.local
+venv/
+.venv/
+env/
+ENV/
+
+# Logs
+*.log
+
+# Node & Frontend Build
+node_modules/
+dist/
+build/
+frontend/node_modules/
+frontend/dist/
+whatsapp-qr-service/node_modules/
+whatsapp-qr-service/sessions/
+scratch/

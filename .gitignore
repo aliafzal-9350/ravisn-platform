@@ -1,0 +1,87 @@
+# ==============================================================================
+# RAVISN Platform: Unified Monorepo .gitignore
+# ==============================================================================
+
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+
+# macOS & Windows system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# ------------------------------------------------------------------------------
+# PHP / Laravel (apps/core)
+# ------------------------------------------------------------------------------
+apps/core/vendor/
+apps/core/storage/logs/*.log
+apps/core/storage/framework/cache/*
+!apps/core/storage/framework/cache/.gitignore
+apps/core/storage/framework/sessions/*
+!apps/core/storage/framework/sessions/.gitignore
+apps/core/storage/framework/views/*
+!apps/core/storage/framework/views/.gitignore
+apps/core/storage/framework/testing/*
+!apps/core/storage/framework/testing/.gitignore
+apps/core/storage/*.key
+apps/core/public/hot
+apps/core/public/storage
+apps/core/public/build
+apps/core/.phpunit.result.cache
+apps/core/.pest/
+apps/core/coverage/
+
+# ------------------------------------------------------------------------------
+# Python / FastAPI (apps/agent)
+# ------------------------------------------------------------------------------
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+apps/agent/.venv/
+apps/agent/venv/
+apps/agent/env/
+apps/agent/.pytest_cache/
+apps/agent/.coverage
+apps/agent/htmlcov/
+apps/agent/*.sqlite
+apps/agent/*.sqlite3
+apps/agent/*.db
+apps/agent/*.log
+apps/agent/uvicorn.log
+apps/agent/ngrok.log
+apps/agent/chroma_db/
+
+# ------------------------------------------------------------------------------
+# Node.js / React / Frontend (apps/frontend, apps/whatsapp-qr-service, apps/core)
+# ------------------------------------------------------------------------------
+**/node_modules/
+**/dist/
+**/build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# WhatsApp QR Sessions
+apps/whatsapp-qr-service/sessions/
+apps/whatsapp-qr-service/.wwebjs_auth/
+apps/whatsapp-qr-service/.wwebjs_cache/
+
+# Docker volumes
+pgdata/
+redisdata/
+qr_sessions/

@@ -1,0 +1,8 @@
+.env
+*.db
+__pycache__/
+*.pyc
+.git
+alembic/versions/__pycache__/
+frontend/
+whatsapp-qr-service/
