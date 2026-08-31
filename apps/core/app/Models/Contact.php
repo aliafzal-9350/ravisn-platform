@@ -2,53 +2,58 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable([
-    'tenant_id', 'name', 'phone', 'email', 'notes',
-    'var1', 'var2', 'var3', 'var4', 'var5',
-])]
 class Contact extends Model
 {
-    use HasFactory;
+    use HasFactory, HasUuids;
 
-    /**
-     * The data type of the primary key ID.
-     *
-     * @var string
-     */
-    protected $keyType = 'string';
+    protected $fillable = [
+        'tenant_id',
+        'first_name',
+        'last_name',
+        'name',
+        'phone',
+        'phone_number',
+        'messenger_psid',
+        'instagram_igsid',
+        'email',
+        'notes',
+        'custom_attributes',
+        'tags',
+        'var1',
+        'var2',
+        'var3',
+        'var4',
+        'var5',
+    ];
 
-
-
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
-            'id' => 'string',
-            'tenant_id' => 'string',
+            'custom_attributes' => 'array',
+            'tags' => 'array',
         ];
     }
 
-    /**
-     * Get the tenant that owns the contact.
-     */
+    public function getFullNameAttribute(): string
+    {
+        if ($this->first_name || $this->last_name) {
+            return trim("{$this->first_name} {$this->last_name}");
+        }
+        return $this->name ?? $this->phone_number ?? $this->phone ?? 'Unknown Contact';
+    }
+
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class);
     }
 
-    /**
-     * Get the groups that this contact belongs to.
-     */
     public function groups(): BelongsToMany
     {
         return $this->belongsToMany(
@@ -57,5 +62,15 @@ class Contact extends Model
             'contact_id',
             'contact_group_id'
         );
+    }
+
+    public function threads(): HasMany
+    {
+        return $this->hasMany(Thread::class, 'contact_id');
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(Message::class, 'contact_id');
     }
 }

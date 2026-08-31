@@ -1,0 +1,34 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class KnowledgeChunk extends Model
+{
+    use HasFactory, HasUuids;
+
+    protected $table = 'knowledge_chunks';
+
+    protected $fillable = [
+        'knowledge_base_id',
+        'content',
+        'metadata',
+        'embedding',
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'metadata' => 'array',
+        ];
+    }
+
+    public function knowledgeBase(): BelongsTo
+    {
+        return $this->belongsTo(KnowledgeBase::class, 'knowledge_base_id');
+    }
+}

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Client\AutomationFlowController;
 use App\Http\Controllers\Client\CampaignController;
 use App\Http\Controllers\Client\ContactController;
@@ -9,7 +10,9 @@ use App\Http\Controllers\Client\DeveloperController;
 use App\Http\Controllers\Client\InboxController;
 use App\Http\Controllers\Client\MessageTemplateController;
 use App\Http\Controllers\Client\WhatsappAccountController;
+use App\Http\Controllers\Crm\ChatController as CrmChatController;
 use App\Http\Controllers\Webhook\WhatsAppWebhookController;
+use App\Http\Controllers\Webhooks\MetaWebhookController;
 use App\Models\SystemNotification;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -28,16 +31,22 @@ Route::get('/terms', function () {
     return Inertia::render('Terms');
 })->name('terms');
 
+// Google Socialite OAuth Routes
+Route::get('/auth/google/redirect', [GoogleAuthController::class, 'redirect'])->name('auth.google.redirect');
+Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('auth.google.callback');
+
 require __DIR__.'/settings.php';
 
-// Webhook Routes
+// Webhook Routes (Meta & WhatsApp)
 Route::prefix('webhook')->name('webhook.')->group(function () {
+    Route::get('meta', [MetaWebhookController::class, 'verify'])->name('meta.verify');
+    Route::post('meta', [MetaWebhookController::class, 'handle'])->name('meta.handle');
     Route::get('whatsapp/{tenant_token?}', [WhatsAppWebhookController::class, 'verify'])->name('whatsapp.verify');
     Route::post('whatsapp/{tenant_token?}', [WhatsAppWebhookController::class, 'handle'])->name('whatsapp.handle');
 });
 
 // Client / Dashboard Routes
-Route::middleware(['auth', 'verified', 'client'])
+Route::middleware(['auth', 'verified'])
     ->prefix('dashboard')
     ->group(function () {
         // Main Dashboard (maps to named route 'dashboard')
@@ -66,11 +75,14 @@ Route::middleware(['auth', 'verified', 'client'])
             Route::post('contact-groups/{group}/contacts', [ContactGroupController::class, 'addContacts'])->name('contact-groups.add-contacts');
             Route::delete('contact-groups/{group}/contacts/{contact}', [ContactGroupController::class, 'removeContact'])->name('contact-groups.remove-contact');
 
-            // Inbox
+            // Inbox & Threads
             Route::get('inbox', [InboxController::class, 'index'])->name('inbox.index');
             Route::get('inbox/chats/{chat}/messages', [InboxController::class, 'messages'])->name('inbox.messages');
             Route::post('inbox/chats/{chat}/send', [InboxController::class, 'sendMessage'])->name('inbox.send');
             Route::post('inbox/chats/{chat}/toggle-ai', [InboxController::class, 'toggleAi'])->name('inbox.toggle-ai');
+
+            // Omni-channel Thread Human Takeover Toggle API
+            Route::patch('threads/{thread}/takeover', [CrmChatController::class, 'toggleTakeover'])->name('threads.takeover');
 
             // Developer Panel
             Route::get('developer', [DeveloperController::class, 'index'])->name('developer.index');

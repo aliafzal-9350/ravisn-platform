@@ -6,12 +6,6 @@ return [
     |--------------------------------------------------------------------------
     | Third Party Services
     |--------------------------------------------------------------------------
-    |
-    | This file is for storing the credentials for third party services such
-    | as Mailgun, Postmark, AWS and more. This file provides the de facto
-    | location for this type of information, allowing packages to have
-    | a conventional file to locate the various service credentials.
-    |
     */
 
     'postmark' => [
@@ -36,13 +30,26 @@ return [
     ],
 
     'facebook' => [
-        'app_id' => env('FACEBOOK_APP_ID'),
-        'app_secret' => env('FACEBOOK_APP_SECRET'),
+        'app_id' => env('FACEBOOK_APP_ID', env('META_APP_ID')),
+        'app_secret' => env('FACEBOOK_APP_SECRET', env('META_APP_SECRET')),
     ],
 
     'meta' => [
-        'access_token' => env('META_ACCESS_TOKEN'),
-        'waba_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
+        'app_id' => env('META_APP_ID'),
+        'app_secret' => env('META_APP_SECRET'),
+        'webhook_verify_token' => env('META_WEBHOOK_VERIFY_TOKEN', env('WHATSAPP_WEBHOOK_VERIFY_TOKEN')),
+        'api_version' => env('META_API_VERSION', 'v21.0'),
+        'whatsapp_phone_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
+        'whatsapp_waba_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
+        'whatsapp_system_token' => env('WHATSAPP_SYSTEM_USER_ACCESS_TOKEN', env('META_ACCESS_TOKEN')),
+        'inbound_ai_stream_key' => env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'),
+        'crm_broadcast_channel' => env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates'),
+    ],
+
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI', env('APP_URL') . '/auth/google/callback'),
     ],
 
     'gemini' => [
@@ -50,8 +57,8 @@ return [
     ],
 
     'whatsapp' => [
-        'app_id' => env('WHATSAPP_APP_ID'),
-        'app_secret' => env('WHATSAPP_APP_SECRET'),
+        'app_id' => env('WHATSAPP_APP_ID', env('META_APP_ID')),
+        'app_secret' => env('WHATSAPP_APP_SECRET', env('META_APP_SECRET')),
         'config_id' => env('WHATSAPP_CONFIG_ID'),
     ],
 
