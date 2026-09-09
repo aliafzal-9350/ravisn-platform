@@ -175,5 +175,3 @@ export default function AccountCreate() {
         </>
     );
 }
-
-AccountCreate.layout = (page: any) => page;

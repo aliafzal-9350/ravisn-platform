@@ -66,7 +66,7 @@ class Thread(Base):
     status: Mapped[str] = mapped_column(String(50), default="open")
     bot_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     contact: Mapped["Contact"] = relationship("Contact", back_populates="threads")

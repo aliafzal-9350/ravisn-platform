@@ -70,7 +70,7 @@ test('api send-text succeeds for the mock number +12125550198', function () {
     // Check database has created a chat
     $chat = WhatsappChat::where('customer_phone', '+12125550198')->first();
     expect($chat)->not->toBeNull();
-    expect($chat->tenant_id)->toBe($this->tenant->id);
+    expect((int) $chat->tenant_id)->toBe((int) $this->tenant->id);
 
     // Check database has created a message
     $this->assertDatabaseHas('whatsapp_messages', [

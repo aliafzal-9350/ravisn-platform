@@ -46,12 +46,23 @@ class MetaWebhookController extends Controller
         $signature = $request->header('X-Hub-Signature-256');
         $rawPayload = $request->getContent();
 
-        // In production, signature validation is mandatory
-        if (app()->environment('production') && ! $this->validator->isValid($rawPayload, $signature)) {
-            Log::warning('[MetaWebhookController] Invalid Signature Rejected', [
-                'signature' => $signature,
-            ]);
-            return response()->json(['error' => 'Invalid signature'], 401);
+        $appSecret = config('services.meta.app_secret', env('META_APP_SECRET'));
+
+        // In production, valid signature is mandatory. In other environments, if signature is provided or secret is set, validate it.
+        if (app()->environment('production')) {
+            if (! $this->validator->isValid($rawPayload, $signature, $appSecret)) {
+                Log::warning('[MetaWebhookController] Invalid Signature Rejected (production)', [
+                    'signature' => $signature,
+                ]);
+                return response()->json(['error' => 'Invalid signature'], 401);
+            }
+        } elseif (! empty($signature) && ! empty($appSecret)) {
+            if (! $this->validator->isValid($rawPayload, $signature, $appSecret)) {
+                Log::warning('[MetaWebhookController] Invalid Signature Rejected', [
+                    'signature' => $signature,
+                ]);
+                return response()->json(['error' => 'Invalid signature'], 401);
+            }
         }
 
         $payload = $request->json()->all();

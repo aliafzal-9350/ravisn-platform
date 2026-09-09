@@ -259,5 +259,3 @@ export default function CampaignsIndex({ campaigns }: CampaignsIndexProps) {
     );
 }
 
-CampaignsIndex.layout = (page: any) => page;
-

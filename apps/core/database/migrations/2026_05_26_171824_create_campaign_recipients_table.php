@@ -18,7 +18,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('campaign_recipients', function (Blueprint $table) {
+        if (! Schema::hasTable('campaign_recipients')) {
+            Schema::create('campaign_recipients', function (Blueprint $table) {
             $table->id();
             $table->foreignId('campaign_id')->constrained()->cascadeOnDelete();
             $table->string('phone_number');
@@ -33,7 +34,8 @@ return new class extends Migration
 
             $table->index(['campaign_id', 'status']);
             $table->index('whatsapp_message_id');
-        });
+            });
+        }
     }
 
     /**

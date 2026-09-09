@@ -242,5 +242,3 @@ export default function TemplateShow({ template }: TemplateShowProps) {
         </>
     );
 }
-
-TemplateShow.layout = (page: any) => page;

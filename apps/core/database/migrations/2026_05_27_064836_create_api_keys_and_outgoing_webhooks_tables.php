@@ -18,27 +18,29 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('api_keys', function (Blueprint $table) {
+        if (! Schema::hasTable('api_keys')) {
+            Schema::create('api_keys', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->string('name');
             $table->string('key', 64)->unique(); // store sha256 hash of the key
             $table->timestamp('last_used_at')->nullable();
             $table->timestamps();
 
-            $table->index('tenant_id');
         });
+        }
 
-        Schema::create('outgoing_webhooks', function (Blueprint $table) {
+        if (! Schema::hasTable('outgoing_webhooks')) {
+            Schema::create('outgoing_webhooks', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->string('url');
             $table->string('secret_token');
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
-            $table->index('tenant_id');
         });
+        }
     }
 
     /**

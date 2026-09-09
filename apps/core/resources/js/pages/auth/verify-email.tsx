@@ -27,7 +27,9 @@ export default function VerifyEmail({ status }: { status?: string }) {
                         </Button>
 
                         <TextLink
-                            href={logout()}
+                            href="/logout"
+                            method="post"
+                            as="button"
                             className="mx-auto block text-sm"
                         >
                             Log out

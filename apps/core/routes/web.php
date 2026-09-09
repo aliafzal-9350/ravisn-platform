@@ -2,13 +2,19 @@
 
 use App\Http\Controllers\Auth\GoogleAuthController;
 use App\Http\Controllers\Client\AutomationFlowController;
+use App\Http\Controllers\Client\BookingController;
 use App\Http\Controllers\Client\CampaignController;
+use App\Http\Controllers\Client\ChannelController;
 use App\Http\Controllers\Client\ContactController;
 use App\Http\Controllers\Client\ContactGroupController;
-use App\Http\Controllers\Client\DashboardController as ClientDashboardController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Client\DeveloperController;
 use App\Http\Controllers\Client\InboxController;
+use App\Http\Controllers\Client\KnowledgeController;
 use App\Http\Controllers\Client\MessageTemplateController;
+use App\Http\Controllers\Client\SettingsController;
+use App\Http\Controllers\Client\SimulatorController;
+use App\Http\Controllers\Client\SystemPromptController;
 use App\Http\Controllers\Client\WhatsappAccountController;
 use App\Http\Controllers\Crm\ChatController as CrmChatController;
 use App\Http\Controllers\Webhook\WhatsAppWebhookController;
@@ -20,14 +26,23 @@ use Inertia\Inertia;
 Route::redirect('/', '/login')->name('home');
 
 Route::get('/privacy', function () {
+    if (auth()->check()) {
+        return redirect('/dashboard/privacy');
+    }
     return Inertia::render('Privacy');
 })->name('privacy');
 
 Route::get('/data-deletion', function () {
+    if (auth()->check()) {
+        return redirect('/dashboard/data-deletion');
+    }
     return Inertia::render('DataDeletion');
 })->name('data-deletion');
 
 Route::get('/terms', function () {
+    if (auth()->check()) {
+        return redirect('/dashboard/terms');
+    }
     return Inertia::render('Terms');
 })->name('terms');
 
@@ -50,10 +65,48 @@ Route::middleware(['auth', 'verified'])
     ->prefix('dashboard')
     ->group(function () {
         // Main Dashboard (maps to named route 'dashboard')
-        Route::get('/', [ClientDashboardController::class, 'index'])->name('dashboard');
+        Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 
         // All other routes prefixed with 'client.' name
         Route::name('client.')->group(function () {
+            // Connect Channels Hub
+            Route::get('connect', [ChannelController::class, 'index'])->name('connect.index');
+            Route::post('connect/sync', [ChannelController::class, 'sync'])->name('connect.sync');
+            Route::post('connect/manual-link/whatsapp', [ChannelController::class, 'manualLinkWhatsApp'])->name('connect.manual-link.whatsapp');
+            Route::post('connect/webhook-token', [ChannelController::class, 'updateWebhookToken'])->name('connect.webhook-token');
+            Route::post('connect/{channel}/token', [ChannelController::class, 'updateToken'])->name('connect.token');
+            Route::post('connect/{channel}/test-ping', [ChannelController::class, 'testPing'])->name('connect.test-ping');
+            Route::delete('connect/{channel}', [ChannelController::class, 'disconnect'])->name('connect.disconnect');
+            Route::post('connect/whatsapp/sync-templates', [ChannelController::class, 'syncTemplates'])->name('connect.sync-templates');
+
+            // Bookings & Lead Intelligence
+            Route::get('bookings', [BookingController::class, 'index'])->name('bookings.index');
+            Route::get('bookings/{contact}/summary', [BookingController::class, 'showSummary'])->name('bookings.summary');
+
+            // Knowledge Base Manager (pgvector RAG)
+            Route::get('knowledge', [KnowledgeController::class, 'index'])->name('knowledge.index');
+            Route::post('knowledge/entry', [KnowledgeController::class, 'storeEntry'])->name('knowledge.entry.store');
+            Route::put('knowledge/entry/{id}', [KnowledgeController::class, 'updateEntry'])->name('knowledge.entry.update');
+            Route::delete('knowledge/entry/{id}', [KnowledgeController::class, 'destroyEntry'])->name('knowledge.entry.destroy');
+            Route::delete('knowledge/all', [KnowledgeController::class, 'destroyAll'])->name('knowledge.destroyAll');
+            Route::post('knowledge/delete-all', [KnowledgeController::class, 'destroyAll'])->name('knowledge.deleteAll');
+            Route::post('knowledge/upload', [KnowledgeController::class, 'upload'])->name('knowledge.upload');
+            Route::delete('knowledge/{id}', [KnowledgeController::class, 'destroy'])->name('knowledge.destroy');
+
+            // System Prompt Tuning
+            Route::get('prompt-tuning', [SystemPromptController::class, 'index'])->name('prompt-tuning.index');
+            Route::post('prompt-tuning', [SystemPromptController::class, 'update'])->name('prompt-tuning.update');
+
+            // Live AI Simulator & Playground
+            Route::get('simulator', [SimulatorController::class, 'index'])->name('simulator.index');
+            Route::post('simulator/query', [SimulatorController::class, 'query'])->name('simulator.query');
+
+            // Settings & Legal Compliance
+            Route::get('settings', [SettingsController::class, 'index'])->name('settings.index');
+            Route::get('privacy', [SettingsController::class, 'privacy'])->name('privacy');
+            Route::get('terms', [SettingsController::class, 'terms'])->name('terms');
+            Route::get('data-deletion', [SettingsController::class, 'dataDeletion'])->name('data-deletion');
+
             // WhatsApp Accounts
             Route::get('whatsapp-accounts', [WhatsappAccountController::class, 'index'])->name('whatsapp-accounts.index');
             Route::get('whatsapp-accounts/create', [WhatsappAccountController::class, 'create'])->name('whatsapp-accounts.create');

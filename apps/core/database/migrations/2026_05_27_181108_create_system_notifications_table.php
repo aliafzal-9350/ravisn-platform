@@ -20,7 +20,7 @@ return new class extends Migration
     {
         Schema::create('system_notifications', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->nullable()->constrained()->onDelete('cascade');
+            $table->string('tenant_id')->nullable()->index();
             $table->string('title');
             $table->text('message');
             $table->string('type')->default('info'); // info, warning, error

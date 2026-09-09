@@ -1,5 +1,24 @@
 <?php
 
+putenv('DB_CONNECTION=pgsql');
+putenv('DB_HOST=postgres');
+putenv('DB_PORT=5432');
+putenv('DB_DATABASE=ravisn_db');
+putenv('DB_USERNAME=ravisn_user');
+putenv('DB_PASSWORD=ravisn_secret_password');
+putenv('DB_SSLMODE=disable');
+putenv('DATABASE_URL=');
+$_ENV['DB_DATABASE'] = 'ravisn_db';
+$_ENV['DB_USERNAME'] = 'ravisn_user';
+$_ENV['DB_PASSWORD'] = 'ravisn_secret_password';
+$_ENV['DB_SSLMODE'] = 'disable';
+$_ENV['DATABASE_URL'] = '';
+$_SERVER['DB_DATABASE'] = 'ravisn_db';
+$_SERVER['DB_USERNAME'] = 'ravisn_user';
+$_SERVER['DB_PASSWORD'] = 'ravisn_secret_password';
+$_SERVER['DB_SSLMODE'] = 'disable';
+$_SERVER['DATABASE_URL'] = '';
+
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -16,6 +35,12 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
+    ->beforeEach(function () {
+        $this->withoutMiddleware([
+            \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
+            \Illuminate\Foundation\Http\Middleware\ValidateCsrfTokens::class,
+        ]);
+    })
     ->in('Feature');
 
 /*

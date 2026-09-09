@@ -2,6 +2,8 @@ import json
 import asyncio
 import logging
 import uuid
+from datetime import datetime
+from sqlalchemy import update
 from redis.asyncio import Redis
 from src.config import settings
 from src.graph.graph import compiled_agent_graph
@@ -102,6 +104,10 @@ async def run_inbound_worker():
                         raw_payload={"telemetry": telemetry}
                     )
                     session.add(outbound_msg)
+                    if thread_id:
+                        await session.execute(
+                            update(Thread).where(Thread.id == uuid.UUID(str(thread_id))).values(last_message_at=datetime.utcnow())
+                        )
                     await session.commit()
             except Exception as db_err:
                 logger.error(f"[RedisConsumer] Failed to write Message to DB: {db_err}")
@@ -118,6 +124,20 @@ async def run_inbound_worker():
                         "content": final_response,
                         "is_ai_generated": True,
                         "intent": final_state.get("intent"),
+                        "message": {
+                            "id": outbound_msg_id,
+                            "thread_id": str(thread_id),
+                            "contact_id": str(contact_id),
+                            "direction": "outbound",
+                            "content": final_response,
+                            "is_ai_generated": True,
+                            "ai_model": telemetry.get("model", settings.OPENAI_CHAT_MODEL),
+                            "detected_intent": final_state.get("intent"),
+                            "latency_ms": telemetry.get("latency_ms"),
+                            "prompt_tokens": telemetry.get("prompt_tokens"),
+                            "completion_tokens": telemetry.get("completion_tokens"),
+                            "created_at": datetime.utcnow().isoformat(),
+                        }
                     })
                 )
             except Exception as pub_err:

@@ -20,7 +20,7 @@ return new class extends Migration
     {
         Schema::create('automation_flows', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->string('name');
             $table->string('trigger_type')->default('keyword');
             $table->string('trigger_keyword');

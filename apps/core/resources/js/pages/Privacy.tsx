@@ -13,6 +13,8 @@ import {
     Cpu,
     Cookie,
     Eye,
+    ExternalLink,
+    Globe,
 } from 'lucide-react';
 
 export default function Privacy() {
@@ -39,13 +41,26 @@ export default function Privacy() {
                             </div>
                         </div>
 
-                        <Link
-                            href="/login"
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-                        >
-                            <ArrowLeft className="h-4 w-4" />
-                            <span>Back to Login</span>
-                        </Link>
+                        <div className="flex items-center gap-2.5">
+                            <a
+                                href="https://ravisn.com"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-emerald-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                                <Globe className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>ravisn.com</span>
+                                <ExternalLink className="h-3 w-3 text-slate-400" />
+                            </a>
+
+                            <Link
+                                href="/login"
+                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                                <span>Back to Login</span>
+                            </Link>
+                        </div>
                     </div>
                 </header>
 
@@ -203,17 +218,49 @@ export default function Privacy() {
                                     5
                                 </span>
                                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">
-                                    Security &amp; Data Retention
+                                    Security, Customer Chat Data Encryption &amp; Retention
                                 </h2>
                             </div>
-                            <div className="mt-4 space-y-3 leading-relaxed text-sm">
+                            <div className="mt-4 space-y-4 leading-relaxed text-sm">
                                 <p>
-                                    We employ industry-standard technical and organizational security standards to protect your data against unauthorized access, loss, or alteration:
+                                    RAVISN is engineered as an enterprise multi-tenant platform with defense-in-depth architecture. We employ military-grade technical and organizational safeguards to secure your customer communications, contact identities, and vector knowledge assets:
                                 </p>
-                                <ul className="list-disc space-y-1.5 pl-5">
-                                    <li><strong>Encryption in Transit:</strong> All data transmitted between your browser, our servers, and Meta Graph API endpoints is encrypted using TLS 1.3 / SSL protocol.</li>
-                                    <li><strong>Encryption at Rest:</strong> Sensitive access tokens, system user credentials, and database records are encrypted using AES-256 encryption.</li>
-                                    <li><strong>Retention Windows:</strong> Account data and contact lists are retained while your subscription is active. System access logs and message delivery logs are automatically purged or anonymized after 90 days unless longer retention is required by law.</li>
+                                <ul className="space-y-3">
+                                    <li className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+                                        <Lock className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                        <div>
+                                            <span className="font-semibold text-slate-900 dark:text-white">Customer Chat Data Encryption at Rest (AES-256):</span>{' '}
+                                            All inbound and outbound WhatsApp/Instagram/Messenger messages, customer contact phone numbers, conversation transcripts, and API credentials stored in our PostgreSQL database are encrypted at rest using AES-256 encryption.
+                                        </div>
+                                    </li>
+                                    <li className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+                                        <Database className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                        <div>
+                                            <span className="font-semibold text-slate-900 dark:text-white">pgvector Multi-Tenant Isolation:</span>{' '}
+                                            Vector embeddings generated for RAG (Retrieval-Augmented Generation) knowledge bases and contextual conversation recall are indexed in a 1536-dimensional HNSW cosine distance topology (`vector_cosine_ops`). Every vector query is strictly hard-scoped by the authenticated tenant ID (`tenant_id`), rendering cross-tenant data leakage structurally impossible.
+                                        </div>
+                                    </li>
+                                    <li className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+                                        <Shield className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                        <div>
+                                            <span className="font-semibold text-slate-900 dark:text-white">Zero Third-Party Model Training:</span>{' '}
+                                            Customer chat messages, audio recordings, and uploaded company documents are processed strictly ephemerally for real-time inference via private API gateways. Your private data is <strong>never</strong> used, shared, or retained to train or fine-tune public foundation AI models (such as those from OpenAI, Google, Groq, or xAI).
+                                        </div>
+                                    </li>
+                                    <li className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+                                        <Server className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                        <div>
+                                            <span className="font-semibold text-slate-900 dark:text-white">Encryption in Transit (TLS 1.3):</span>{' '}
+                                            All communications between end-user browsers, the RAVISN dashboard, Meta Cloud API v21.0 webhooks, and backend Redis Stream workers operate exclusively over TLS 1.3 with mandatory HMAC SHA-256 payload signature validation.
+                                        </div>
+                                    </li>
+                                    <li className="flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-3.5 dark:border-slate-800 dark:bg-slate-950/40">
+                                        <FileText className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                        <div>
+                                            <span className="font-semibold text-slate-900 dark:text-white">Retention &amp; Purging Protocols:</span>{' '}
+                                            Live chat threads and contact records are retained while your subscription is active. System logs, delivery receipts, and intermediate audio transcription caches are automatically purged after 90 days.
+                                        </div>
+                                    </li>
                                 </ul>
                             </div>
                         </section>
@@ -239,7 +286,7 @@ export default function Privacy() {
                                         <span>How to Request Data Deletion:</span>
                                     </div>
                                     <blockquote className="mt-3 rounded-lg border-l-4 border-emerald-600 bg-emerald-50/80 p-4 text-xs sm:text-sm font-medium leading-relaxed text-slate-800 dark:bg-emerald-950/50 dark:text-slate-200">
-                                        &quot;Users may request full deletion of their account, connected WABA credentials, uploaded contact lists, and message history by navigating to Account Settings &gt; Security in their RAVISN dashboard, or by emailing our Data Protection Team at <a href="mailto:support@ravisnapp.com" className="text-emerald-700 underline dark:text-emerald-400 font-bold">support@ravisnapp.com</a> with the subject &apos;Data Deletion Request&apos;.&quot;
+                                        &quot;Users may request full deletion of their account, connected WABA credentials, uploaded contact lists, and message history by navigating to Account Settings &gt; Security in their RAVISN dashboard, or by emailing our Data Protection Team at <a href="mailto:ravisn.uk@gmail.com" className="text-emerald-700 underline dark:text-emerald-400 font-bold">ravisn.uk@gmail.com</a> with the subject &apos;Data Deletion Request&apos;.&quot;
                                     </blockquote>
                                 </div>
 
@@ -296,12 +343,12 @@ export default function Privacy() {
                                                 RAVISN Support &amp; Privacy Team
                                             </div>
                                             <div className="text-xs text-slate-500">
-                                                Email: support@ravisnapp.com
+                                                Email: ravisn.uk@gmail.com
                                             </div>
                                         </div>
                                     </div>
                                     <a
-                                        href="mailto:support@ravisnapp.com?subject=Privacy%20Inquiry"
+                                        href="mailto:ravisn.uk@gmail.com?subject=Privacy%20Inquiry"
                                         className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
                                     >
                                         <Mail className="h-3.5 w-3.5" />
@@ -316,8 +363,12 @@ export default function Privacy() {
                 {/* Simple Footer */}
                 <footer className="border-t border-slate-200 bg-white py-8 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900">
                     <div className="mx-auto max-w-4xl px-4">
-                        <p>&copy; {new Date().getFullYear()} RAVISN. All rights reserved. Powered by Meta WhatsApp Cloud API.</p>
-                        <div className="mt-2 flex justify-center gap-4 text-slate-400">
+                        <p>&copy; {new Date().getFullYear()} RAVISN Technologies. All rights reserved. Powered by Meta WhatsApp Cloud API.</p>
+                        <div className="mt-2 flex flex-wrap justify-center gap-4 text-slate-400">
+                            <a href="https://ravisn.com" target="_blank" rel="noopener noreferrer" className="hover:text-emerald-600 dark:hover:text-emerald-400 font-medium">
+                                ravisn.com
+                            </a>
+                            <span>&bull;</span>
                             <Link href="/privacy" className="hover:text-slate-600 dark:hover:text-slate-200">
                                 Privacy Policy
                             </Link>

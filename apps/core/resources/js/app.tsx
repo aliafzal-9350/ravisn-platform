@@ -16,8 +16,16 @@ createInertiaApp({
             case name.startsWith('auth/'):
                 return AuthLayout;
             case name.startsWith('settings/'):
-                return [AppLayout, SettingsLayout];
+                return [ClientLayout, SettingsLayout];
+            case name.startsWith('Chat/'):
+            case name.startsWith('chat/'):
+            case name.startsWith('client/inbox/'):
+                return (page) => page;
             case name.startsWith('client/'):
+            case name.startsWith('Channels/'):
+            case name.startsWith('channels/'):
+            case name === 'Dashboard':
+            case name === 'dashboard':
                 return ClientLayout;
             default:
                 return AppLayout;

@@ -23,7 +23,11 @@ class Contact extends Model
         'messenger_psid',
         'instagram_igsid',
         'email',
+        'company_name',
+        'industry',
+        'lead_stage',
         'notes',
+        'internal_notes',
         'custom_attributes',
         'tags',
         'var1',
@@ -39,6 +43,26 @@ class Contact extends Model
             'custom_attributes' => 'array',
             'tags' => 'array',
         ];
+    }
+
+    public function getInternalNotesAttribute($value): ?string
+    {
+        return $value ?? $this->notes;
+    }
+
+    public function getCompanyNameAttribute($value): ?string
+    {
+        return $value ?? ($this->custom_attributes['company_name'] ?? null);
+    }
+
+    public function getIndustryAttribute($value): ?string
+    {
+        return $value ?? ($this->custom_attributes['industry'] ?? null);
+    }
+
+    public function getLeadStageAttribute($value): ?string
+    {
+        return $value ?? ($this->custom_attributes['lead_stage'] ?? 'Enterprise Lead (High Priority)');
     }
 
     public function getFullNameAttribute(): string

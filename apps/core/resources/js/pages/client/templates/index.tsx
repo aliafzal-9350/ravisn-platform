@@ -87,7 +87,7 @@ export default function TemplatesIndex({ templates }: TemplatesIndexProps) {
                     <StatusBadge status={row.status} />
                     {row.rejection_reason && (
                         <span
-                            className="max-w-[150px] truncate text-[10px] font-medium text-rose-500"
+                            className="block max-w-[160px] truncate text-[10px] font-medium text-rose-500"
                             title={row.rejection_reason}
                         >
                             Reason: {row.rejection_reason}
@@ -210,5 +210,3 @@ export default function TemplatesIndex({ templates }: TemplatesIndexProps) {
         </>
     );
 }
-
-TemplatesIndex.layout = (page: any) => page;

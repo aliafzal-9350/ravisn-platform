@@ -7,6 +7,15 @@ use Laravel\Fortify\Features;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->withoutMiddleware([
+            \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
+            \Illuminate\Foundation\Http\Middleware\ValidateCsrfTokens::class,
+        ]);
+    }
+
     protected function skipUnlessFortifyHas(string $feature, ?string $message = null): void
     {
         if (! Features::enabled($feature)) {

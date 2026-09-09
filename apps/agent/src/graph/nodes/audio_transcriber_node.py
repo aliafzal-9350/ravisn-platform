@@ -10,7 +10,6 @@ async def audio_transcriber_node(state: AgentState) -> AgentState:
     """Detects voice notes/audio, fetches media buffer from Meta CDN, and transcribes to text."""
     msg_type = state.get("message_type", "text")
     media_id = state.get("media_id")
-    raw_content = state.get("raw_content") or ""
 
     if msg_type in ["audio", "voice"] and media_id and state.get("access_token"):
         logger.info(f"[AudioTranscriberNode] Processing voice note media_id: {media_id}")
@@ -18,12 +17,13 @@ async def audio_transcriber_node(state: AgentState) -> AgentState:
         audio_bytes = await meta_client.fetch_media_bytes(media_id, state["access_token"])
 
         if audio_bytes:
-            transcript, confidence = await AudioService.transcribe_audio(audio_bytes, f"{media_id}.ogg")
+            transcript, confidence, metrics = await AudioService.transcribe_audio(audio_bytes, f"{media_id}.ogg")
             if transcript:
                 state["raw_content"] = transcript
                 state["telemetry"]["transcribed"] = True
                 state["telemetry"]["transcription_confidence"] = confidence
-                logger.info(f"[AudioTranscriberNode] Transcription success: {transcript}")
+                state["telemetry"].update(metrics)
+                logger.info(f"[AudioTranscriberNode] Transcription success ({metrics.get('asr_latency_ms')}ms): {transcript}")
             else:
                 state["raw_content"] = "[Voice Note Received - Unclear Audio]"
         else:

@@ -33,7 +33,20 @@
         @fonts
 
         @viteReactRefresh
-        @vite(['resources/css/app.css', 'resources/js/app.tsx', "resources/js/pages/{$page['component']}.tsx"])
+        @php
+            $component = $page['component'];
+            $componentPath = "resources/js/pages/{$component}.tsx";
+            if (file_exists(public_path('build/manifest.json'))) {
+                $manifest = json_decode(file_get_contents(public_path('build/manifest.json')), true) ?? [];
+                if (!isset($manifest[$componentPath])) {
+                    $lowerPath = "resources/js/pages/" . strtolower($component) . ".tsx";
+                    if (isset($manifest[$lowerPath])) {
+                        $componentPath = $lowerPath;
+                    }
+                }
+            }
+        @endphp
+        @vite(['resources/css/app.css', 'resources/js/app.tsx', $componentPath])
         <x-inertia::head>
             <title>{{ config('app.name', 'RAVISN') }}</title>
         </x-inertia::head>

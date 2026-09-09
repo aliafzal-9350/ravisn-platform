@@ -1,0 +1,16 @@
+node_modules
+vendor
+.venv
+.git
+.github
+.agents
+.claude
+.codex
+storage/*.key
+public/build
+public/hot
+.env
+.env.backup
+.phpunit.result.cache
+npm-debug.log
+yarn-error.log

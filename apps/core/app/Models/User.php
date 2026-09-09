@@ -22,15 +22,6 @@ class User extends Authenticatable implements PasskeyUser
     use HasFactory, Notifiable, PasskeyAuthenticatable, TwoFactorAuthenticatable;
 
     /**
-     * The data type of the primary key ID.
-     *
-     * @var string
-     */
-    protected $keyType = 'string';
-
-
-
-    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
@@ -38,8 +29,6 @@ class User extends Authenticatable implements PasskeyUser
     protected function casts(): array
     {
         return [
-            'id' => 'string',
-            'tenant_id' => 'string',
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'two_factor_confirmed_at' => 'datetime',

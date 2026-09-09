@@ -18,39 +18,24 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('contacts', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
-            $table->string('name');
-            $table->string('phone');
-            $table->string('email')->nullable();
-            $table->text('notes')->nullable();
-            $table->string('var1')->nullable();
-            $table->string('var2')->nullable();
-            $table->string('var3')->nullable();
-            $table->string('var4')->nullable();
-            $table->string('var5')->nullable();
-            $table->timestamps();
+        if (! Schema::hasTable('contact_groups')) {
+            Schema::create('contact_groups', function (Blueprint $table) {
+                $table->id();
+                $table->string('tenant_id')->index();
+                $table->string('name');
+                $table->text('description')->nullable();
+                $table->timestamps();
+            });
+        }
 
-            $table->index(['tenant_id', 'phone']);
-        });
+        if (! Schema::hasTable('contact_group_memberships')) {
+            Schema::create('contact_group_memberships', function (Blueprint $table) {
+                $table->foreignUuid('contact_id')->constrained('contacts')->cascadeOnDelete();
+                $table->foreignId('contact_group_id')->constrained('contact_groups')->cascadeOnDelete();
 
-        Schema::create('contact_groups', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
-            $table->string('name');
-            $table->text('description')->nullable();
-            $table->timestamps();
-
-            $table->index('tenant_id');
-        });
-
-        Schema::create('contact_group_memberships', function (Blueprint $table) {
-            $table->foreignId('contact_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('contact_group_id')->constrained()->cascadeOnDelete();
-
-            $table->primary(['contact_id', 'contact_group_id']);
-        });
+                $table->primary(['contact_id', 'contact_group_id']);
+            });
+        }
     }
 
     /**
@@ -60,6 +45,5 @@ return new class extends Migration
     {
         Schema::dropIfExists('contact_group_memberships');
         Schema::dropIfExists('contact_groups');
-        Schema::dropIfExists('contacts');
     }
 };

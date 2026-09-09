@@ -1,0 +1,17 @@
+{
+  "timestamp": "2026-09-01 08:23:40 UTC",
+  "dataset_samples": 3,
+  "metrics": {
+    "faithfulness": 1.0,
+    "context_precision": 0.9893,
+    "context_recall": 1.0,
+    "answer_relevance": 0.746
+  },
+  "targets": {
+    "faithfulness": ">= 0.92",
+    "context_precision": ">= 0.90",
+    "context_recall": ">= 0.85",
+    "answer_relevance": ">= 0.85"
+  },
+  "status": "PASS"
+}

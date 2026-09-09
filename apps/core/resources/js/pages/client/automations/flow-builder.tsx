@@ -35,7 +35,7 @@ import {
     MessageSquare,
     Save,
     Search,
-    Sparkles,
+    ShoppingBag,
     Table2,
     Trash2,
     UserRoundCog,
@@ -1438,7 +1438,7 @@ export function FlowBuilder({ groups, flow }: FlowBuilderProps) {
             name: 'Abandoned Cart and Store Offers',
             description:
                 'Handles abandoned cart, discount code, and product questions, then saves the sales lead.',
-            icon: Sparkles,
+            icon: ShoppingBag,
             color: 'amber',
             actions: [
                 {

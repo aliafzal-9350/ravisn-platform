@@ -10,7 +10,6 @@ import {
     HelpCircle,
     UserCheck,
     CheckCircle2,
-    Sparkles,
 } from 'lucide-react';
 import * as React from 'react';
 import { toast } from 'sonner';
@@ -112,22 +111,22 @@ return;
                     </div>
                 </div>
 
-                {/* PART 1: UI AUTOMATION STRATEGY CONTROL (THE 3 CARDS) */}
+                {/* PART 1: INBOUND CONVERSATION STRATEGY CONTROL */}
                 <div className="rounded-2xl border border-border/80 bg-card p-6 shadow-sm">
-                    <div className="mb-5 flex items-center justify-between">
+                    <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
                             <div className="flex items-center gap-2">
-                                <Sparkles className="h-4 w-4 text-emerald-500" />
+                                <Workflow className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                                 <h2 className="text-base font-bold text-foreground">
-                                    AUTOMATION SECTION: ACTIVE STRATEGY
+                                    Inbound Conversation Strategy
                                 </h2>
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                                Select the active master AI strategy injected into incoming WhatsApp webhooks.
+                                Select the active conversation strategy applied to incoming WhatsApp, Messenger, and Instagram inquiries.
                             </p>
                         </div>
-                        <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-extrabold text-primary">
-                            Strategy Variable: <code className="font-mono text-emerald-600 dark:text-emerald-400">{activeStrategy}</code>
+                        <span className="self-start sm:self-auto rounded-full bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            Active Mode: {activeStrategy === 'lead_qualifier' ? 'Lead Qualifier' : activeStrategy === 'faq_responder' ? 'FAQ Responder' : 'Human Agent Only'}
                         </span>
                     </div>
 
@@ -146,9 +145,9 @@ return;
                                         <Bot className="h-5 w-5 text-emerald-700 dark:text-emerald-300" />
                                     </div>
                                     {activeStrategy === 'lead_qualifier' ? (
-                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-sm">
+                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-xs">
                                             <CheckCircle2 className="h-3.5 w-3.5" />
-                                            <span>ACTIVE 🟢</span>
+                                            <span>Active</span>
                                         </span>
                                     ) : (
                                         <Button
@@ -160,18 +159,18 @@ return;
                                             }
                                             className="h-8 text-xs font-semibold"
                                         >
-                                            SELECT
+                                            Select Strategy
                                         </Button>
                                     )}
                                 </div>
                                 <h3 className="mt-4 text-sm font-extrabold text-foreground">
-                                    CARD 1: LEAD QUALIFIER
+                                    Autonomous Lead Qualifier
                                 </h3>
-                                <p className="mt-1 font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                                    [2-Turn Qualify & Handover]
+                                <p className="mt-1 font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                    2-Turn Qualification & Booking
                                 </p>
                                 <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                                    Qualifies incoming leads in 2 turns, captures business details, offers a free consultation, and triggers human handover upon confirmation.
+                                    Qualifies incoming leads in 2 turns, captures customer requirements, schedules a consultation, and triggers human takeover upon booking.
                                 </p>
                             </div>
                         </div>
@@ -190,9 +189,9 @@ return;
                                         <HelpCircle className="h-5 w-5 text-sky-700 dark:text-sky-300" />
                                     </div>
                                     {activeStrategy === 'faq_responder' ? (
-                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-sm">
+                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-xs">
                                             <CheckCircle2 className="h-3.5 w-3.5" />
-                                            <span>ACTIVE 🟢</span>
+                                            <span>Active</span>
                                         </span>
                                     ) : (
                                         <Button
@@ -204,18 +203,18 @@ return;
                                             }
                                             className="h-8 text-xs font-semibold"
                                         >
-                                            SELECT
+                                            Select Strategy
                                         </Button>
                                     )}
                                 </div>
                                 <h3 className="mt-4 text-sm font-extrabold text-foreground">
-                                    CARD 2: FAQ RESPONDER
+                                    Knowledge Base Assistant
                                 </h3>
-                                <p className="mt-1 font-mono text-xs font-bold text-sky-600 dark:text-sky-400">
-                                    [Knowledge Base Only]
+                                <p className="mt-1 font-mono text-xs font-semibold text-sky-600 dark:text-sky-400">
+                                    Verified Knowledge Base Only
                                 </p>
                                 <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                                    Answers client questions strictly using RAVISN's embedded Knowledge Base. Zero sales push, zero lead capture, strict zero-pricing policy.
+                                    Answers customer inquiries strictly using your business Knowledge Base documents and verified FAQs. Zero ungrounded generation.
                                 </p>
                             </div>
                         </div>
@@ -234,9 +233,9 @@ return;
                                         <UserCheck className="h-5 w-5 text-amber-700 dark:text-amber-300" />
                                     </div>
                                     {activeStrategy === 'pure_manual' ? (
-                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white shadow-sm">
+                                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-xs">
                                             <CheckCircle2 className="h-3.5 w-3.5" />
-                                            <span>ACTIVE 🟢</span>
+                                            <span>Active</span>
                                         </span>
                                     ) : (
                                         <Button
@@ -248,18 +247,18 @@ return;
                                             }
                                             className="h-8 text-xs font-semibold"
                                         >
-                                            SELECT
+                                            Select Strategy
                                         </Button>
                                     )}
                                 </div>
                                 <h3 className="mt-4 text-sm font-extrabold text-foreground">
-                                    CARD 3: PURE MANUAL MODE
+                                    Direct Human Agent Mode
                                 </h3>
-                                <p className="mt-1 font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
-                                    [AI Completely Disabled]
+                                <p className="mt-1 font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                    Staff Live Chat Routing
                                 </p>
                                 <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
-                                    Completely bypasses AI generation for all incoming messages. All customer discussions are stored strictly for human staff in Live Chat.
+                                    Routes all inbound customer conversations directly to human support staff in Live Chat. AI generation remains fully disabled.
                                 </p>
                             </div>
                         </div>
@@ -358,7 +357,7 @@ return;
                                 No interactive flows created yet
                             </h2>
                             <p className="mx-auto mt-2 max-w-md text-sm font-medium text-muted-foreground">
-                                Create interactive keyword flows or visual graph workflows to complement your master AI strategy.
+                                Create interactive keyword flows or visual workflows to customize your automated customer engagement.
                             </p>
                             <Button
                                 asChild
@@ -376,5 +375,3 @@ return;
         </>
     );
 }
-
-AutomationsIndex.layout = (page: React.ReactNode) => page;

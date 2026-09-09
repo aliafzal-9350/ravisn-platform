@@ -55,13 +55,17 @@ class PushInboundToAiJob implements ShouldQueue
             }
 
             DB::transaction(function () use ($channel, $senderPhone, $rawMsg) {
-                $contact = Contact::firstOrCreate(
-                    ['phone_number' => $senderPhone],
-                    [
-                        'first_name' => $rawMsg['profile']['name'] ?? 'WhatsApp User',
+                $contact = Contact::where('phone_number', $senderPhone)
+                    ->orWhere('phone', $senderPhone)
+                    ->first();
+
+                if (! $contact) {
+                    $contact = Contact::create([
+                        'phone_number' => $senderPhone,
                         'phone' => $senderPhone,
-                    ]
-                );
+                        'first_name' => $rawMsg['profile']['name'] ?? 'WhatsApp User',
+                    ]);
+                }
 
                 $thread = Thread::firstOrCreate(
                     [
@@ -122,6 +126,17 @@ class PushInboundToAiJob implements ShouldQueue
                             'channel' => 'whatsapp',
                             'content' => $content,
                             'sender' => $contact->full_name,
+                            'message' => [
+                                'id' => (string) $message->id,
+                                'thread_id' => (string) $thread->id,
+                                'contact_id' => (string) $contact->id,
+                                'direction' => 'inbound',
+                                'channel_type' => 'whatsapp',
+                                'content' => $content,
+                                'is_ai_generated' => false,
+                                'status' => 'received',
+                                'created_at' => $message->created_at->toISOString(),
+                            ]
                         ])
                     );
                 } catch (\Throwable $e) {
@@ -208,6 +223,35 @@ class PushInboundToAiJob implements ShouldQueue
                     ]);
 
                     $thread->update(['last_message_at' => now()]);
+
+                    // Notify CRM UI in real-time
+                    try {
+                        Redis::publish(
+                            config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
+                            json_encode([
+                                'event' => 'MessageCreated',
+                                'thread_id' => (string) $thread->id,
+                                'message_id' => (string) $message->id,
+                                'direction' => 'inbound',
+                                'channel' => $channelType,
+                                'content' => $content,
+                                'sender' => $contact->full_name,
+                                'message' => [
+                                    'id' => (string) $message->id,
+                                    'thread_id' => (string) $thread->id,
+                                    'contact_id' => (string) $contact->id,
+                                    'direction' => 'inbound',
+                                    'channel_type' => $channelType,
+                                    'content' => $content,
+                                    'is_ai_generated' => false,
+                                    'status' => 'received',
+                                    'created_at' => $message->created_at->toISOString(),
+                                ]
+                            ])
+                        );
+                    } catch (\Throwable $e) {
+                        Log::warning('[PushInboundToAiJob] Redis Pub/Sub broadcast skipped: ' . $e->getMessage());
+                    }
 
                     if ($thread->bot_active) {
                         $aiJobPayload = json_encode([

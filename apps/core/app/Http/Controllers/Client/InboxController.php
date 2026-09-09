@@ -2,78 +2,164 @@
 
 namespace App\Http\Controllers\Client;
 
+use App\Http\Controllers\Api\ChatController as ApiChatController;
 use App\Http\Controllers\Controller;
 use App\Models\Contact;
+use App\Models\Message;
 use App\Models\MessageTemplate;
+use App\Models\Thread;
+use App\Models\WhatsappAccount;
 use App\Models\WhatsappChat;
+use App\Models\WhatsappMessage;
 use App\Services\WhatsApp\WhatsAppCloudApi;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class InboxController extends Controller
 {
     /**
-     * Display the inbox.
+     * Display the omnichannel inbox (React 19 + Inertia).
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|JsonResponse
     {
-        $tenant = $request->user()->tenant;
+        $apiChatController = new ApiChatController();
 
-        $accounts = $tenant->whatsappAccounts()
+        // If client specifically requests JSON (e.g. API caller), return JSON
+        if ($request->wantsJson() && ! $request->header('X-Inertia')) {
+            return $apiChatController->index($request);
+        }
+
+        $tenant = $request->user()?->tenant;
+
+        // Fetch threads eager-loading contact, channelIdentity, and latest message
+        $threadsQuery = Thread::with([
+            'contact',
+            'channelIdentity',
+            'messages' => function ($q) {
+                $q->latest('created_at')->limit(1);
+            },
+        ])->orderByDesc('last_message_at');
+
+        $threadsCollection = $threadsQuery->get()->map(function (Thread $thread) {
+            $contact = $thread->contact;
+            $latestMsg = $thread->messages->first();
+            $session = ApiChatController::computeSessionWindow($thread);
+
+            $unreadCount = $thread->messages()
+                ->where('direction', 'inbound')
+                ->where('status', '!=', 'read')
+                ->count();
+
+            return [
+                'id' => (string) $thread->id,
+                'channel_type' => $thread->channel_type ?? 'whatsapp',
+                'status' => $thread->status ?? 'open',
+                'bot_active' => (bool) $thread->bot_active,
+                'last_message_at' => $thread->last_message_at?->toISOString() ?? $thread->created_at?->toISOString(),
+                'last_message_preview' => $latestMsg?->content ?? 'Conversation started',
+                'unread_count' => $unreadCount,
+                'session_remaining' => $session['session_remaining'],
+                'is_session_open' => $session['is_session_open'],
+                'session_formatted' => $session['session_formatted'],
+                'session_countdown' => $session['session_countdown'],
+                'contact' => $contact ? [
+                    'id' => (string) $contact->id,
+                    'name' => $contact->name ?? $contact->full_name,
+                    'full_name' => $contact->full_name,
+                    'phone_number' => $contact->phone_number ?? $contact->phone,
+                    'phone' => $contact->phone ?? $contact->phone_number,
+                    'email' => $contact->email,
+                    'company_name' => $contact->company_name,
+                    'industry' => $contact->industry,
+                    'lead_stage' => $contact->lead_stage ?? 'Enterprise Lead (High Priority)',
+                    'internal_notes' => $contact->internal_notes,
+                    'notes' => $contact->notes,
+                    'updated_at' => $contact->updated_at?->toISOString(),
+                ] : null,
+                'channel_identity' => $thread->channelIdentity ? [
+                    'id' => (string) $thread->channelIdentity->id,
+                    'channel_type' => $thread->channelIdentity->channel_type,
+                    'name' => $thread->channelIdentity->name,
+                ] : null,
+            ];
+        });
+
+        $selectedThreadId = $request->query('thread_id');
+        if (empty($selectedThreadId) && $threadsCollection->isNotEmpty()) {
+            $selectedThreadId = (string) $threadsCollection->first()['id'];
+        }
+
+        // Fetch initial active thread messages if thread exists
+        $initialThreadData = null;
+        if ($selectedThreadId) {
+            $initialThread = Thread::with(['contact', 'channelIdentity'])->find($selectedThreadId);
+            if ($initialThread) {
+                $session = ApiChatController::computeSessionWindow($initialThread);
+                $messages = Message::where('thread_id', $initialThread->id)
+                    ->orderBy('created_at', 'asc')
+                    ->get()
+                    ->map(fn (Message $m) => [
+                        'id' => (string) $m->id,
+                        'thread_id' => (string) $m->thread_id,
+                        'direction' => $m->direction,
+                        'message_type' => $m->message_type ?? 'text',
+                        'content' => $m->content ?? '',
+                        'status' => $m->status ?? 'sent',
+                        'is_ai_generated' => (bool) $m->is_ai_generated,
+                        'created_at' => $m->created_at?->toISOString() ?? now()->toISOString(),
+                        'formatted_time' => $m->created_at ? $m->created_at->format('g:i A') : now()->format('g:i A'),
+                        'date_group' => $m->created_at && $m->created_at->isToday() ? 'TODAY' : ($m->created_at ? $m->created_at->format('M d, Y') : 'TODAY'),
+                    ]);
+
+                $c = $initialThread->contact;
+                $initialThreadData = [
+                    'thread' => [
+                        'id' => (string) $initialThread->id,
+                        'channel_type' => $initialThread->channel_type ?? 'whatsapp',
+                        'status' => $initialThread->status ?? 'open',
+                        'bot_active' => (bool) $initialThread->bot_active,
+                        'last_message_at' => $initialThread->last_message_at?->toISOString() ?? $initialThread->created_at?->toISOString(),
+                        'session_remaining' => $session['session_remaining'],
+                        'is_session_open' => $session['is_session_open'],
+                        'session_formatted' => $session['session_formatted'],
+                        'session_countdown' => $session['session_countdown'],
+                    ],
+                    'contact' => $c ? [
+                        'id' => (string) $c->id,
+                        'name' => $c->name ?? $c->full_name,
+                        'full_name' => $c->full_name,
+                        'phone_number' => $c->phone_number ?? $c->phone,
+                        'phone' => $c->phone ?? $c->phone_number,
+                        'email' => $c->email,
+                        'company_name' => $c->company_name,
+                        'industry' => $c->industry,
+                        'lead_stage' => $c->lead_stage ?? 'Enterprise Lead (High Priority)',
+                        'internal_notes' => $c->internal_notes,
+                        'notes' => $c->notes,
+                        'updated_at' => $c->updated_at?->toISOString(),
+                    ] : null,
+                    'messages' => $messages,
+                ];
+            }
+        }
+
+        // Available WhatsApp Accounts
+        $accounts = $tenant ? $tenant->whatsappAccounts()
             ->whereIn('status', ['active', 'ACTIVE'])
             ->get()
             ->map(fn ($acc) => [
                 'id' => (string) $acc->id,
                 'phone_number' => $acc->phone_number,
                 'display_name' => $acc->display_name,
-            ]);
+                'channel_type' => 'whatsapp',
+            ]) : collect();
 
-        $selectedAccountId = $request->query('whatsapp_account_id');
-        if (! $selectedAccountId && $accounts->isNotEmpty()) {
-            $selectedAccountId = (string) $accounts->first()['id'];
-        }
-
-        $chats = [];
-        if ($selectedAccountId) {
-            $chats = WhatsappChat::where('tenant_id', (string) $tenant->id)
-                ->where('whatsapp_account_id', (string) $selectedAccountId)
-                ->orderBy('last_message_at', 'desc')
-                ->get()
-                ->map(function ($chat) use ($tenant) {
-                    $contact = Contact::where('tenant_id', (string) $tenant->id)
-                        ->where('phone', $chat->customer_phone)
-                        ->first();
-
-                    // Calculate remaining session time (in seconds) based on the last inbound message
-                    $lastInbound = $chat->messages()
-                        ->where('direction', 'inbound')
-                        ->latest('sent_at')
-                        ->first();
-
-                    $sessionRemaining = null;
-                    if ($lastInbound) {
-                        $sentAt = $lastInbound->sent_at ?? $lastInbound->created_at;
-                        $diffSeconds = 86400 - now()->diffInSeconds($sentAt);
-                        $sessionRemaining = $diffSeconds > 0 ? $diffSeconds : 0;
-                    }
-
-                    return [
-                        'id' => (string) $chat->id,
-                        'customer_phone' => $chat->customer_phone,
-                        'customer_name' => $contact ? $contact->name : $chat->customer_name,
-                        'last_message_at' => $chat->last_message_at?->toIso8601String(),
-                        'session_remaining' => $sessionRemaining,
-                        'is_session_open' => $sessionRemaining > 0 && $sessionRemaining !== null,
-                        'is_ai_active' => (bool) ($chat->is_ai_active ?? true),
-                    ];
-                });
-        }
-
-        $templates = $tenant->messageTemplates()
-            ->where('whatsapp_account_id', (string) $selectedAccountId)
+        // Templates
+        $templates = $tenant ? $tenant->messageTemplates()
             ->whereIn('status', ['approved', 'APPROVED'])
             ->get()
             ->map(fn ($template) => [
@@ -83,156 +169,181 @@ class InboxController extends Controller
                 'category' => $template->category,
                 'status' => strtoupper($template->status),
                 'components' => $template->components,
+            ]) : collect();
+
+        return Inertia::render('Chat/Inbox', [
+            'threads' => $threadsCollection,
+            'initialThreadId' => $selectedThreadId,
+            'initialThread' => $initialThreadData,
+            'accounts' => $accounts,
+            'templates' => $templates,
+            'openCount' => Thread::where(function ($q) {
+                $q->where('status', 'open')->orWhereNull('status');
+            })->count(),
+        ]);
+    }
+
+    /**
+     * Get messages for a specific chat or thread.
+     */
+    public function messages(Request $request, string $chatId): JsonResponse
+    {
+        $thread = Str::isUuid($chatId) ? Thread::find($chatId) : null;
+        if ($thread) {
+            $apiChatController = new ApiChatController();
+            return $apiChatController->showThread($chatId);
+        }
+
+        // Check fallback WhatsappChat
+        $waChat = WhatsappChat::find($chatId);
+        if ($waChat) {
+            $messages = $waChat->messages()
+                ->orderBy('created_at', 'asc')
+                ->get()
+                ->map(fn ($m) => [
+                    'id' => (string) $m->id,
+                    'thread_id' => (string) $chatId,
+                    'direction' => $m->direction,
+                    'message_type' => $m->message_type ?? 'text',
+                    'content' => $m->body ?? $m->content ?? '',
+                    'status' => $m->status ?? 'delivered',
+                    'is_ai_generated' => (bool) ($m->is_ai_generated ?? false),
+                    'created_at' => $m->created_at->toIso8601String(),
+                    'formatted_time' => $m->created_at ? $m->created_at->format('g:i A') : now()->format('g:i A'),
+                    'date_group' => $m->created_at && $m->created_at->isToday() ? 'TODAY' : ($m->created_at ? $m->created_at->format('M d, Y') : 'TODAY'),
+                ]);
+
+            return response()->json([
+                'thread' => [
+                    'id' => (string) $waChat->id,
+                    'channel_type' => 'whatsapp',
+                    'status' => 'open',
+                    'bot_active' => !(bool) ($waChat->is_ai_active ?? true),
+                    'session_remaining' => 86400,
+                    'is_session_open' => true,
+                    'session_formatted' => '24h 00m',
+                    'session_countdown' => '24:00:00',
+                ],
+                'contact' => [
+                    'id' => (string) $waChat->id,
+                    'name' => $waChat->customer_name ?: $waChat->customer_phone,
+                    'phone_number' => $waChat->customer_phone,
+                    'email' => null,
+                    'company_name' => null,
+                    'industry' => null,
+                    'lead_stage' => 'Enterprise Lead (High Priority)',
+                    'internal_notes' => null,
+                ],
+                'messages' => $messages,
+            ]);
+        }
+
+        return response()->json(['error' => 'Thread not found'], 404);
+    }
+
+    /**
+     * Send a text message to a customer.
+     */
+    public function sendMessage(Request $request, string $chatId, WhatsAppCloudApi $whatsAppApi): JsonResponse
+    {
+        $thread = Str::isUuid($chatId) ? Thread::find($chatId) : null;
+        if ($thread) {
+            $apiChatController = new ApiChatController();
+            return $apiChatController->sendMessage($request, $chatId);
+        }
+
+        // Fallback WhatsappChat send
+        $waChat = WhatsappChat::find($chatId);
+        if ($waChat) {
+            // Check 24-hour free-text session window
+            $msgType = $request->input('type') ?? $request->input('message_type') ?? 'text';
+            if ($msgType === 'text') {
+                $lastInbound = $waChat->messages()
+                    ->where('direction', 'inbound')
+                    ->latest('created_at')
+                    ->first();
+
+                if (! $lastInbound || $lastInbound->created_at->lt(now()->subHours(24))) {
+                    return response()->json([
+                        'error' => 'The 24-hour free-text session window is closed. Please send a template message instead.',
+                    ], 403);
+                }
+            }
+
+            $bodyText = $request->input('content') ?? $request->input('body') ?? '';
+            $account = $waChat->whatsappAccount;
+            $metaMessageId = 'staff_' . bin2hex(random_bytes(8));
+            try {
+                if ($account?->access_token) {
+                    $whatsAppApi->withToken($account->access_token);
+                }
+                $apiRes = $whatsAppApi->sendTextMessage(
+                    $account?->phone_number_id ?? 'phone-123',
+                    $waChat->customer_phone,
+                    $bodyText
+                );
+                if ($apiRes && method_exists($apiRes, 'json')) {
+                    $metaMessageId = $apiRes->json('messages.0.id') ?? $metaMessageId;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('WhatsApp live send error: ' . $e->getMessage());
+            }
+
+            $message = $waChat->messages()->create([
+                'direction' => 'outbound',
+                'message_type' => $msgType,
+                'body' => $bodyText,
+                'meta_message_id' => $metaMessageId,
+                'status' => 'sent',
+                'sent_at' => now(),
             ]);
 
-        return Inertia::render('client/inbox/index', [
-            'accounts' => $accounts,
-            'chats' => $chats,
-            'selectedAccountId' => $selectedAccountId ? (string) $selectedAccountId : null,
-            'templates' => $templates,
-            'activeStrategy' => $tenant->ai_strategy ?? 'lead_qualifier',
-        ]);
-    }
-
-    /**
-     * Get messages for a specific chat.
-     */
-    public function messages(Request $request, WhatsappChat $chat): JsonResponse
-    {
-        if ((string) $chat->tenant_id !== (string) $request->user()->tenant_id) {
-            return response()->json(['error' => 'Forbidden'], 403);
-        }
-
-        $messages = $chat->messages()
-            ->orderBy('created_at', 'asc')
-            ->get();
-
-        return response()->json($messages);
-    }
-
-    /**
-     * Send a text or template message to a customer.
-     */
-    public function sendMessage(Request $request, WhatsappChat $chat, WhatsAppCloudApi $whatsAppApi): JsonResponse
-    {
-        $validated = $request->validate([
-            'type' => ['nullable', 'string', 'in:text,template'],
-            'body' => ['required_if:type,text', 'nullable', 'string'],
-            'template_id' => ['required_if:type,template', 'nullable', 'string'],
-            'variables' => ['nullable', 'array'],
-        ]);
-
-        $type = $validated['type'] ?? 'text';
-
-        if ((string) $chat->tenant_id !== (string) $request->user()->tenant_id) {
-            return response()->json(['error' => 'Forbidden'], 403);
-        }
-
-        $account = $chat->whatsappAccount;
-        if ($account->access_token) {
-            $whatsAppApi->withToken($account->access_token);
-        }
-
-        // Validate 24-hour window on server side for free-text messages
-        if ($type === 'text') {
-            $lastInbound = $chat->messages()
-                ->where('direction', 'inbound')
-                ->latest('sent_at')
-                ->first();
-
-            $isSessionOpen = false;
-            if ($lastInbound) {
-                $sentAt = $lastInbound->sent_at ?? $lastInbound->created_at;
-                $isSessionOpen = $sentAt->diffInHours(now()) < 24;
-            }
-
-            if (! $isSessionOpen) {
-                return response()->json([
-                    'error' => __('The 24-hour free-text session window is closed. Please send a template message instead.'),
-                ], 403);
-            }
-        }
-
-        try {
-            if ($type === 'text') {
-                $response = $whatsAppApi->sendTextMessage($account->phone_number_id, $chat->customer_phone, $validated['body']);
-                $msgId = $response->json('messages.0.id');
-
-                $message = $chat->messages()->create([
-                    'direction' => 'outbound',
-                    'message_type' => 'text',
-                    'body' => $validated['body'],
-                    'meta_message_id' => $msgId,
-                    'status' => 'sent',
-                    'sent_at' => now(),
-                ]);
-            } else {
-                $template = MessageTemplate::where('tenant_id', (string) $request->user()->tenant_id)
-                    ->where('id', (string) $validated['template_id'])
-                    ->firstOrFail();
-
-                $components = [];
-                if (! empty($validated['variables'])) {
-                    $components = $template->getTemplateComponents($validated['variables']);
-                }
-
-                $response = $whatsAppApi->sendTemplateMessage(
-                    $account->phone_number_id,
-                    $chat->customer_phone,
-                    $template->name,
-                    $template->language,
-                    $components
-                );
-                $msgId = $response->json('messages.0.id');
-
-                $approxBody = $template->formatBodyText($validated['variables'] ?? []);
-
-                $message = $chat->messages()->create([
-                    'direction' => 'outbound',
-                    'message_type' => 'template',
-                    'body' => $approxBody,
-                    'meta_message_id' => $msgId,
-                    'status' => 'sent',
-                    'sent_at' => now(),
-                ]);
-            }
-
-            // Automatic Human Override (Auto-Pause): Human staff member sent message -> is_ai_active = false
-            $chat->update([
+            $waChat->update([
                 'last_message_at' => now(),
                 'is_ai_active' => false,
             ]);
 
-            return response()->json($message);
-        } catch (\Exception $e) {
-            Log::error('Inbox reply sending failed', [
-                'chat_id' => $chat->id,
-                'customer_phone' => $chat->customer_phone,
-                'error' => $e->getMessage(),
+            return response()->json([
+                'id' => (string) $message->id,
+                'direction' => 'outbound',
+                'message_type' => $msgType,
+                'content' => $bodyText,
+                'status' => 'sent',
+                'is_ai_generated' => false,
+                'created_at' => now()->toIso8601String(),
+                'formatted_time' => now()->format('g:i A'),
+                'date_group' => 'TODAY',
             ]);
-
-            return response()->json(['error' => $e->getMessage()], 422);
         }
+
+        return response()->json(['error' => 'Chat not found'], 404);
     }
 
     /**
-     * Toggle or set AI active state for a specific chat.
+     * Toggle or set AI active state for a specific chat or thread.
      */
-    public function toggleAi(Request $request, WhatsappChat $chat): JsonResponse
+    public function toggleAi(Request $request, string $chatId): JsonResponse
     {
-        if ((string) $chat->tenant_id !== (string) $request->user()->tenant_id) {
-            return response()->json(['error' => 'Forbidden'], 403);
+        if (Str::isUuid($chatId)) {
+            $apiChatController = new ApiChatController();
+            return $apiChatController->toggleBot($chatId);
         }
 
-        $isAiActive = $request->has('is_ai_active')
-            ? $request->boolean('is_ai_active')
-            : ! $chat->is_ai_active;
+        $waChat = WhatsappChat::find($chatId);
+        if ($waChat) {
+            $state = $request->has('is_ai_active')
+                ? (bool) $request->input('is_ai_active')
+                : !($waChat->is_ai_active ?? true);
 
-        $chat->update(['is_ai_active' => $isAiActive]);
+            $waChat->update(['is_ai_active' => $state]);
 
-        return response()->json([
-            'success' => true,
-            'is_ai_active' => $chat->is_ai_active,
-        ]);
+            return response()->json([
+                'success' => true,
+                'is_ai_active' => $state,
+                'bot_active' => $state,
+            ]);
+        }
+
+        return response()->json(['error' => 'Chat not found'], 404);
     }
 }

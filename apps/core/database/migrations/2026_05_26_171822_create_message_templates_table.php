@@ -18,9 +18,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('message_templates', function (Blueprint $table) {
+        if (! Schema::hasTable('message_templates')) {
+            Schema::create('message_templates', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->foreignId('whatsapp_account_id')->constrained()->cascadeOnDelete();
             $table->string('meta_template_id')->nullable();
             $table->string('name');
@@ -32,7 +33,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['tenant_id', 'status']);
-        });
+            });
+        }
     }
 
     /**

@@ -89,12 +89,14 @@ return [
 
         'pgsql' => [
             'driver' => 'pgsql',
-            'url' => env('DB_URL'),
-            'host' => env('DB_HOST', '127.0.0.1'),
+            'url' => env('DB_MIGRATION_MODE', false)
+                ? (env('DATABASE_MIGRATION_URL') ?: env('DB_URL') ?: null)
+                : (env('DATABASE_URL') ?: env('DB_URL') ?: null),
+            'host' => env('DB_HOST', 'postgres'),
             'port' => env('DB_PORT', '5432'),
-            'database' => env('DB_DATABASE', 'laravel'),
-            'username' => env('DB_USERNAME', 'root'),
-            'password' => env('DB_PASSWORD', ''),
+            'database' => env('DB_DATABASE', 'ravisn_db'),
+            'username' => env('DB_USERNAME', 'ravisn_user'),
+            'password' => env('DB_PASSWORD', 'ravisn_secret_password'),
             'charset' => env('DB_CHARSET', 'utf8'),
             'prefix' => '',
             'prefix_indexes' => true,
@@ -157,8 +159,8 @@ return [
         ],
 
         'default' => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'url' => env('REDIS_URL', 'redis://redis:6379/0'),
+            'host' => env('REDIS_HOST', 'redis'),
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),
@@ -170,8 +172,8 @@ return [
         ],
 
         'cache' => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
+            'url' => env('REDIS_URL', 'redis://redis:6379/0'),
+            'host' => env('REDIS_HOST', 'redis'),
             'username' => env('REDIS_USERNAME'),
             'password' => env('REDIS_PASSWORD'),
             'port' => env('REDIS_PORT', '6379'),

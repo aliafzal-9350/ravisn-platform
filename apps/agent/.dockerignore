@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 .git
+.venv/
+.pytest_cache/
 alembic/versions/__pycache__/
 frontend/
 whatsapp-qr-service/

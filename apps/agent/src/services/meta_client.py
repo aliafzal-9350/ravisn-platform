@@ -1,6 +1,6 @@
 import logging
 import httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -17,13 +17,15 @@ class MetaGraphClient:
         recipient_id: str,
         text: str,
         access_token: str,
-        phone_number_id: Optional[str] = None
+        phone_number_id: Optional[str] = None,
+        quick_replies: Optional[List[str]] = None
     ) -> Dict[str, Any]:
-        """Dispatch text response to Meta Graph API based on channel type."""
+        """Dispatch channel-optimized response to Meta Graph API based on channel type."""
         async with httpx.AsyncClient(timeout=15.0) as client:
             headers = {"Authorization": f"Bearer {access_token}"}
+            channel_norm = (channel or "whatsapp").lower()
 
-            if channel == "whatsapp":
+            if channel_norm == "whatsapp":
                 phone_id = phone_number_id or settings.WHATSAPP_PHONE_NUMBER_ID or "me"
                 url = f"{self.base_url}/{phone_id}/messages"
                 payload = {
@@ -33,12 +35,31 @@ class MetaGraphClient:
                     "type": "text",
                     "text": {"preview_url": False, "body": text}
                 }
-            else:
-                # Messenger / Instagram
+
+            elif channel_norm == "instagram":
+                # Instagram Direct enforces a 1,000 character limit
+                truncated_text = text[:996] + "..." if len(text) > 1000 else text
                 url = f"{self.base_url}/me/messages"
                 payload = {
                     "recipient": {"id": recipient_id},
-                    "message": {"text": text}
+                    "message": {"text": truncated_text}
+                }
+
+            else:
+                # Facebook Messenger (2,000 character limit + optional Quick Replies)
+                truncated_text = text[:1996] + "..." if len(text) > 2000 else text
+                url = f"{self.base_url}/me/messages"
+                message_payload: Dict[str, Any] = {"text": truncated_text}
+
+                if quick_replies:
+                    message_payload["quick_replies"] = [
+                        {"content_type": "text", "title": qr[:20], "payload": qr}
+                        for qr in quick_replies[:13]  # Messenger max 13 quick replies
+                    ]
+
+                payload = {
+                    "recipient": {"id": recipient_id},
+                    "message": message_payload
                 }
 
             try:

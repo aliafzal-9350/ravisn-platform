@@ -1,0 +1,38 @@
+# RAVISN Omnichannel Autonomous Platform
+
+> Production-grade omnichannel autonomous AI agent and outreach CRM platform.
+
+## Architecture Summary
+- **apps/core**: Laravel 11 / PHP 8.3 / Inertia React 19 / PostgreSQL 16 + pgvector / Redis 7.2
+- **apps/agent**: FastAPI / Python 3.11 / LangGraph / Groq / Gemini / xAI Grok / OpenAI / Whisper
+- **Channels**: WhatsApp Business Platform (Cloud API v21.0), Facebook Messenger, Instagram Direct
+- **Storage**: PostgreSQL 16 with pgvector extension (1536-dim HNSW cosine distance index)
+- **Messaging Pipeline**: Meta Webhook (<150ms ACK) -> Redis Stream (`inbound_ai_jobs`) -> FastAPI LangGraph -> Redis Pub/Sub (`crm_channel_updates`) -> Laravel Reverb WebSocket UI & WhatsApp Outbound Dispatcher
+
+## API Endpoints Reference
+
+### Core Laravel Gateway (`http://localhost:8000`)
+- `GET  /webhooks/meta`: Webhook verification challenge (hub.mode, hub.verify_token, hub.challenge)
+- `POST /webhooks/meta`: Inbound message webhook with HMAC SHA-256 validation (`X-Hub-Signature-256`)
+- `POST /api/v1/inbox/threads/{id}/toggle-bot`: Toggle autonomous AI response (`bot_active`: true/false)
+- `POST /api/v1/inbox/threads/{id}/messages`: Send manual staff message (auto-pauses AI)
+- `POST /api/v1/campaigns/{id}/send`: Trigger mass outbound campaign batch
+
+### Agent FastAPI Intelligence Layer (`http://localhost:8001`)
+- `GET  /api/v1/health`: Health status of database, redis, and provider cascade
+- `POST /api/v1/chat`: Direct synchronous conversation execution through LangGraph
+- `POST /api/v1/knowledge/ingest`: Ingest documents into pgvector knowledge base
+- `POST /api/v1/process`: Trigger LangGraph workflow execution on state payload
+
+## Multi-AI Provider Cascade Priority
+1. Primary: Groq (`llama-3.3-70b-versatile`, temp 0.3)
+2. Fallback 1: Google Gemini (`gemini-2.5-flash`)
+3. Fallback 2: xAI Grok (`grok-3-mini`)
+4. Fallback 3: OpenAI (`gpt-4o-mini` / `gpt-4o`)
+5. Safety Net: Deterministic Offline Responder
+
+## Hybrid RAG Architecture
+- Dense: pgvector cosine distance (`1 - (embedding <=> chunk_vector)`)
+- Sparse: PostgreSQL Full-Text Search (`ts_rank_cd(to_tsvector('english', content), query)`)
+- Fusion: Reciprocal rank score ($0.7 \times \text{dense} + 0.3 \times \text{sparse}$)
+- CRAG Quality Grading: HIGH ($\ge 0.70$), MEDIUM ($0.45-0.70$), LOW ($<0.45$)

@@ -13,10 +13,13 @@ class VectorStoreService:
     async def similarity_search(
         session: AsyncSession,
         query: str,
-        limit: int = 4,
-        threshold: float = 0.75
+        limit: int = 3,
+        threshold: float = 0.60
     ) -> List[Dict[str, Any]]:
         """Query knowledge chunks using pgvector cosine similarity."""
+        if not query.strip():
+            return []
+
         embedding = await EmbeddingService.generate_embedding(query)
         if not embedding:
             logger.warning("[VectorStoreService] Could not generate embedding for query.")
@@ -24,12 +27,13 @@ class VectorStoreService:
 
         try:
             # Query pgvector cosine distance: 1 - cosine_distance = similarity
-            # Vector cosine distance operator in pgvector is <=>
             stmt = select(
                 KnowledgeChunk.id,
                 KnowledgeChunk.content,
                 KnowledgeChunk.metadata_,
                 (1 - KnowledgeChunk.embedding.cosine_distance(embedding)).label("similarity")
+            ).where(
+                KnowledgeChunk.embedding.isnot(None)
             ).order_by(
                 KnowledgeChunk.embedding.cosine_distance(embedding)
             ).limit(limit)

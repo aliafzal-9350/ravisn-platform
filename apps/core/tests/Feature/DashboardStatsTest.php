@@ -124,7 +124,7 @@ test('dashboard stats count all message sources correctly', function () {
 
     $response->assertOk();
     $response->assertInertia(fn ($page) => $page
-        ->component('client/dashboard')
+        ->component('dashboard')
         ->has('stats')
         ->where('stats.totalMessagesSent', 4)   // 4 outbound
         ->where('stats.totalDelivered', 2)       // delivered + read

@@ -120,10 +120,9 @@ test('campaign completed with failures creates a system notification', function 
         ->andThrow(new Exception('Network error'));
 
     // Run the job which will catch the error, update status to failed, and trigger completion check
-    app(SendCampaignMessage::class, [
-        'campaign' => $campaign,
-        'recipient' => $recipient,
-    ])->handle($whatsAppApi);
+    $job = new SendCampaignMessage($campaign, $recipient);
+    $job->tries = 1;
+    $job->handle($whatsAppApi);
 
     $this->assertDatabaseHas('system_notifications', [
         'tenant_id' => $this->tenant->id,
@@ -164,7 +163,7 @@ test('meta phone number quality webhook update to yellow or red triggers alert n
 
     $this->assertDatabaseHas('system_notifications', [
         'tenant_id' => $this->tenant->id,
-        'title' => 'حرج: انخفاض جودة الرقم إلى الأحمر',
+        'title' => 'Critical: Phone number quality dropped to RED',
         'type' => 'error',
     ]);
 });

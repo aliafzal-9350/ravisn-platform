@@ -114,6 +114,34 @@ class WebhookHandler
         }
     }
 
+    protected function handlePhoneNumberQualityUpdate(array $value): void
+    {
+        $phoneNumberId = $value['phone_number_id'] ?? null;
+        $newRating = strtoupper($value['new_quality_rating'] ?? $value['current_limit'] ?? '');
+
+        if (! $phoneNumberId || ! $newRating) {
+            return;
+        }
+
+        $account = WhatsappAccount::where('phone_number_id', $phoneNumberId)->first();
+        if ($account) {
+            $oldRating = $account->quality_rating;
+            $account->update(['quality_rating' => $newRating]);
+            if (in_array($newRating, ['RED', 'YELLOW'])) {
+                $type = $newRating === 'RED' ? 'error' : 'warning';
+                $title = $newRating === 'RED' ? 'Critical: Phone number quality dropped to RED' : 'Warning: Phone number quality dropped to YELLOW';
+                $message = "Your phone number ({$account->phone_number}) quality changed from {$oldRating} to {$newRating}.";
+
+                SystemNotification::create([
+                    'tenant_id' => $account->tenant_id,
+                    'title' => $title,
+                    'message' => $message,
+                    'type' => $type,
+                ]);
+            }
+        }
+    }
+
     /**
      * Process new incoming messages from customer.
      *
@@ -707,44 +735,5 @@ class WebhookHandler
         }
 
         return mb_stripos($messageText, $condition) !== false;
-    }
-
-    /**
-     * Handle phone number quality rating updates from Meta webhook.
-     *
-     * @param  array<string, mixed>  $value
-     */
-    protected function handlePhoneNumberQualityUpdate(array $value): void
-    {
-        $phoneNumberId = $value['phone_number_id'] ?? null;
-        $newRating = strtoupper($value['new_quality_rating'] ?? '');
-
-        if (! $phoneNumberId) {
-            return;
-        }
-
-        $account = WhatsappAccount::where('phone_number_id', $phoneNumberId)->first();
-        if (! $account) {
-            \Illuminate\Support\Facades\Log::warning('Webhook received for unknown phone_number_id', ['phone_number_id' => $phoneNumberId]);
-            return;
-        }
-
-        $oldRating = $account->quality_rating;
-        $account->update([
-            'quality_rating' => $newRating,
-        ]);
-
-        if (in_array($newRating, ['YELLOW', 'RED'])) {
-            $type = $newRating === 'RED' ? 'error' : 'warning';
-            $arTitle = $newRating === 'RED' ? 'Critical: Phone number quality dropped to RED' : 'Warning: Phone number quality dropped to YELLOW';
-            $arMessage = "Your phone number ({$account->phone_number}) from {$oldRating} to {$newRating}. Please review customer feedback to avoid phone number restrictions.";
-
-            SystemNotification::create([
-                'tenant_id' => $account->tenant_id,
-                'title' => $arTitle,
-                'message' => $arMessage,
-                'type' => $type,
-            ]);
-        }
     }
 }

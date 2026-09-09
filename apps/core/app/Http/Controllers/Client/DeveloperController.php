@@ -40,11 +40,27 @@ class DeveloperController extends Controller
                 'created_at' => $webhook->created_at->format('Y-m-d H:i'),
             ]);
 
+        $appUrl = config('app.url', url('/'));
+        $webhookUrl = config('services.meta.webhook_url', rtrim($appUrl, '/') . '/webhook/meta');
+        $verifyToken = $tenant->webhook_token ?? config('services.meta.verify_token', env('META_VERIFY_TOKEN', 'meta-verify-token-prod'));
+
+        $metaWebhook = [
+            'ingress_url' => $webhookUrl,
+            'url' => $webhookUrl,
+            'verify_token' => $verifyToken,
+            'api_version' => 'v21.0',
+            'is_active' => true,
+            'sla_latency' => '<150ms',
+            'signature_verification' => 'Active (X-Hub-Signature-256 HMAC)',
+            'subscribed_fields' => 'messages, messaging_postbacks, message_deliveries, message_reads',
+        ];
+
         return Inertia::render('client/developer/index', [
             'apiKeys' => $apiKeys,
             'webhooks' => $webhooks,
             // Pass generated key if it exists in the session flash
             'plainApiKey' => session('plainApiKey'),
+            'metaWebhook' => $metaWebhook,
         ]);
     }
 

@@ -12,6 +12,8 @@ import {
     AlertTriangle,
     Scale,
     Ban,
+    ExternalLink,
+    Globe,
 } from 'lucide-react';
 
 export default function Terms() {
@@ -38,13 +40,26 @@ export default function Terms() {
                             </div>
                         </div>
 
-                        <Link
-                            href="/login"
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-                        >
-                            <ArrowLeft className="h-4 w-4" />
-                            <span>Back to Login</span>
-                        </Link>
+                        <div className="flex items-center gap-2.5">
+                            <a
+                                href="https://ravisn.com"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-emerald-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                                <Globe className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>ravisn.com</span>
+                                <ExternalLink className="h-3 w-3 text-slate-400" />
+                            </a>
+
+                            <Link
+                                href="/login"
+                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                                <span>Back to Login</span>
+                            </Link>
+                        </div>
                     </div>
                 </header>
 
@@ -162,7 +177,7 @@ export default function Terms() {
                                     You are responsible for maintaining the confidentiality of your account login credentials, API keys, and Meta OAuth sessions. You accept full responsibility for all activities, messages, and API calls initiated under your account credentials.
                                 </p>
                                 <p>
-                                    You agree to notify RAVISN immediately at <a href="mailto:support@ravisnapp.com" className="text-emerald-600 underline font-semibold dark:text-emerald-400">support@ravisnapp.com</a> if you suspect any unauthorized access or security breach involving your account.
+                                    You agree to notify RAVISN immediately at <a href="mailto:ravisn.uk@gmail.com" className="text-emerald-600 underline font-semibold dark:text-emerald-400">ravisn.uk@gmail.com</a> if you suspect any unauthorized access or security breach involving your account.
                                 </p>
                             </div>
                         </section>
@@ -254,12 +269,12 @@ export default function Terms() {
                                                 RAVISN Legal Team
                                             </div>
                                             <div className="text-xs text-slate-500">
-                                                Email: support@ravisnapp.com
+                                                Email: ravisn.uk@gmail.com
                                             </div>
                                         </div>
                                     </div>
                                     <a
-                                        href="mailto:support@ravisnapp.com?subject=Terms%20Inquiry"
+                                        href="mailto:ravisn.uk@gmail.com?subject=Terms%20Inquiry"
                                         className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700"
                                     >
                                         <Mail className="h-3.5 w-3.5" />
@@ -274,8 +289,12 @@ export default function Terms() {
                 {/* Simple Footer */}
                 <footer className="border-t border-slate-200 bg-white py-8 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900">
                     <div className="mx-auto max-w-4xl px-4">
-                        <p>&copy; {new Date().getFullYear()} RAVISN. All rights reserved. Powered by Meta WhatsApp Cloud API.</p>
-                        <div className="mt-2 flex justify-center gap-4 text-slate-400">
+                        <p>&copy; {new Date().getFullYear()} RAVISN Technologies. All rights reserved. Powered by Meta WhatsApp Cloud API.</p>
+                        <div className="mt-2 flex flex-wrap justify-center gap-4 text-slate-400">
+                            <a href="https://ravisn.com" target="_blank" rel="noopener noreferrer" className="hover:text-emerald-600 dark:hover:text-emerald-400 font-medium">
+                                ravisn.com
+                            </a>
+                            <span>&bull;</span>
                             <Link href="/privacy" className="hover:text-slate-600 dark:hover:text-slate-200">
                                 Privacy Policy
                             </Link>

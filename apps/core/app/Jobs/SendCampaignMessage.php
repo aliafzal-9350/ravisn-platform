@@ -302,6 +302,15 @@ class SendCampaignMessage implements ShouldQueue
                 'status' => 'completed',
                 'completed_at' => now(),
             ]);
+
+            if ($this->campaign->failed_count > 0 && $this->campaign->tenant_id) {
+                \App\Models\SystemNotification::create([
+                    'tenant_id' => $this->campaign->tenant_id,
+                    'title' => 'فشل جزئي أو كلي في إرسال الحملة',
+                    'message' => "Campaign '{$this->campaign->name}' finished with {$this->campaign->failed_count} failures.",
+                    'type' => 'error',
+                ]);
+            }
         }
     }
 }

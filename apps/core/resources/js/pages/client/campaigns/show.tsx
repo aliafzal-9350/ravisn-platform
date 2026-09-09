@@ -418,5 +418,3 @@ export default function CampaignShow({
     );
 }
 
-CampaignShow.layout = (page: any) => page;
-

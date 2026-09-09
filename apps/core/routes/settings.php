@@ -24,4 +24,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->name('user-password.update');
 
     Route::inertia('settings/appearance', 'settings/appearance')->name('appearance.edit');
+    Route::redirect('settings/privacy', '/dashboard/privacy');
+    Route::redirect('settings/terms', '/dashboard/terms');
+    Route::redirect('settings/data-deletion', '/dashboard/data-deletion');
 });

@@ -2,7 +2,6 @@
 # RAVISN Platform: Unified Multi-Service Local & Production Orchestration
 # ==============================================================================
 
-version: '3.8'
 
 services:
   # ----------------------------------------------------------------------------
@@ -15,13 +14,12 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/conf.d:/etc/nginx/conf.d:ro
     restart: always
     mem_limit: 150m
     depends_on:
       - core
       - agent
-      - whatsapp-qr-service
 
   # ----------------------------------------------------------------------------
   # 2. Laravel Core (CRM Dashboard, Inertia React, Outbound Campaigns, Auth)
@@ -36,20 +34,26 @@ services:
       - DB_CONNECTION=pgsql
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_DATABASE=${POSTGRES_DB:-ravisn_platform}
-      - DB_USERNAME=${POSTGRES_USER:-postgres}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-secure_postgres_pass}
+      - DB_DATABASE=${DB_DATABASE:-ravisn_db}
+      - DB_USERNAME=${DB_USERNAME:-ravisn_user}
+      - DB_PASSWORD=${DB_PASSWORD:-ravisn_secret_password}
       - REDIS_CLIENT=phpredis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - APP_URL=${APP_URL:-http://localhost}
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_STORE=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
+      - APP_URL=${APP_URL:-http://localhost:8000}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "8080:80"
+      - "8000:80"
+    volumes:
+      - ./apps/core:/var/www/html
     restart: always
     mem_limit: 800m
 
@@ -61,18 +65,22 @@ services:
       context: ./apps/core
       dockerfile: Dockerfile
     container_name: ravisn-core-worker
-    command: php artisan queue:work --queue=campaigns,webhooks,default --sleep=1 --tries=3 --max-time=3600
+    command: php artisan queue:work redis --queue=campaigns,webhooks,default --sleep=1 --tries=3 --max-time=3600
     env_file: .env
     environment:
       - DB_CONNECTION=pgsql
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_DATABASE=${POSTGRES_DB:-ravisn_platform}
-      - DB_USERNAME=${POSTGRES_USER:-postgres}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-secure_postgres_pass}
+      - DB_DATABASE=${DB_DATABASE:-ravisn_db}
+      - DB_USERNAME=${DB_USERNAME:-ravisn_user}
+      - DB_PASSWORD=${DB_PASSWORD:-ravisn_secret_password}
       - REDIS_CLIENT=phpredis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_STORE=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,70 +88,74 @@ services:
         condition: service_healthy
       core:
         condition: service_started
+    volumes:
+      - ./apps/core:/var/www/html
     restart: always
     mem_limit: 400m
 
   # ----------------------------------------------------------------------------
-  # 4. FastAPI Agent (Multi-Agent AI, LangGraph, RAG/pgvector, Inbound Webhooks)
+  # 4. FastAPI Agent (Multi-Agent AI, LangGraph, RAG/pgvector, Inbound Intelligence)
   # ----------------------------------------------------------------------------
   agent:
     build:
       context: ./apps/agent
       dockerfile: Dockerfile
     container_name: ravisn-agent
-    command: sh -c "alembic upgrade head 2>/dev/null || true; uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_postgres_pass}@postgres:5432/${POSTGRES_DB:-ravisn_platform}
+      - DATABASE_URL=${DATABASE_POOLER_URL}
+      - DATABASE_ASYNC_URL=${DATABASE_ASYNC_URL}
       - REDIS_URL=redis://redis:6379/0
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - XAI_API_KEY=${XAI_API_KEY}
-      - XAI_MODEL=${XAI_MODEL:-grok-3-mini}
-      - CALCOM_API_KEY=${CALCOM_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - META_APP_SECRET=${META_APP_SECRET}
-      - WHATSAPP_WEBHOOK_VERIFY_TOKEN=${WHATSAPP_WEBHOOK_VERIFY_TOKEN}
       - META_WEBHOOK_VERIFY_TOKEN=${META_WEBHOOK_VERIFY_TOKEN}
-      - WHATSAPP_QR_SERVICE_URL=${WHATSAPP_QR_SERVICE_URL:-http://whatsapp-qr-service:3001}
       - CORS_ORIGINS=${CORS_ORIGINS:-*}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./apps/agent:/app
     ports:
-      - "8000:8000"
+      - "8001:8000"
     restart: always
     mem_limit: 800m
 
   # ----------------------------------------------------------------------------
-  # 5. Celery Worker (Agent Async Tasks & Vector Indexing)
+  # 5. FastAPI Inbound Stream Consumer (LangGraph Worker)
   # ----------------------------------------------------------------------------
-  celery-worker:
+  agent-worker:
     build:
       context: ./apps/agent
       dockerfile: Dockerfile
-    container_name: ravisn-celery-worker
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    container_name: ravisn-agent-worker
+    command: python -m src.workers.redis_consumer
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-secure_postgres_pass}@postgres:5432/${POSTGRES_DB:-ravisn_platform}
+      - DATABASE_URL=${DATABASE_POOLER_URL}
+      - DATABASE_ASYNC_URL=${DATABASE_ASYNC_URL}
       - REDIS_URL=redis://redis:6379/0
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - XAI_API_KEY=${XAI_API_KEY}
-      - XAI_MODEL=${XAI_MODEL:-grok-3-mini}
-      - CALCOM_API_KEY=${CALCOM_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - META_APP_SECRET=${META_APP_SECRET}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      agent:
+        condition: service_started
+    volumes:
+      - ./apps/agent:/app
     restart: always
-    mem_limit: 500m
+    mem_limit: 600m
 
   # ----------------------------------------------------------------------------
   # 6. PostgreSQL Database with pgvector Extension
@@ -152,9 +164,9 @@ services:
     image: pgvector/pgvector:pg16
     container_name: ravisn-postgres
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-secure_postgres_pass}
-      - POSTGRES_DB=${POSTGRES_DB:-ravisn_platform}
+      - POSTGRES_USER=${DB_USERNAME:-postgres}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-secret}
+      - POSTGRES_DB=${DB_DATABASE:-ravisn_db}
     volumes:
       - pgdata:/var/lib/postgresql/data
     command: >
@@ -163,7 +175,7 @@ services:
                -c work_mem=32MB
                -c max_connections=100
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -191,28 +203,6 @@ services:
     ports:
       - "6379:6379"
 
-  # ----------------------------------------------------------------------------
-  # 8. WhatsApp QR Socket Service (Node.js / Baileys)
-  # ----------------------------------------------------------------------------
-  whatsapp-qr-service:
-    build:
-      context: ./apps/whatsapp-qr-service
-      dockerfile: Dockerfile
-    container_name: ravisn-qr-service
-    env_file: .env
-    environment:
-      - BACKEND_URL=http://agent:8000
-      - PORT=3001
-      - INTERNAL_SECRET=${WHATSAPP_QR_INTERNAL_SECRET:-dev-internal-secret}
-    volumes:
-      - qr_sessions:/app/sessions
-    depends_on:
-      - agent
-    ports:
-      - "3001:3001"
-    restart: always
-    mem_limit: 250m
-
 # ------------------------------------------------------------------------------
 # Persistent Storage Volumes
 # ------------------------------------------------------------------------------
@@ -220,6 +210,4 @@ volumes:
   pgdata:
     driver: local
   redisdata:
-    driver: local
-  qr_sessions:
     driver: local

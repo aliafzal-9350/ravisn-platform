@@ -11,6 +11,8 @@ import {
     UserCheck,
     Settings,
     FileCheck,
+    ExternalLink,
+    Globe,
 } from 'lucide-react';
 
 export default function DataDeletion() {
@@ -37,13 +39,26 @@ export default function DataDeletion() {
                             </div>
                         </div>
 
-                        <Link
-                            href="/login"
-                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
-                        >
-                            <ArrowLeft className="h-4 w-4" />
-                            <span>Back to Login</span>
-                        </Link>
+                        <div className="flex items-center gap-2.5">
+                            <a
+                                href="https://ravisn.com"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-emerald-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                                <Globe className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <span>ravisn.com</span>
+                                <ExternalLink className="h-3 w-3 text-slate-400" />
+                            </a>
+
+                            <Link
+                                href="/login"
+                                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                                <span>Back to Login</span>
+                            </Link>
+                        </div>
                     </div>
                 </header>
 
@@ -170,7 +185,7 @@ export default function DataDeletion() {
                                                 Send an email from your registered account email address to:
                                             </p>
                                             <p className="font-bold text-slate-900 dark:text-white">
-                                                Email Target: <a href="mailto:support@ravisnapp.com" className="text-emerald-600 underline dark:text-emerald-400">support@ravisnapp.com</a>
+                                                Email Target: <a href="mailto:ravisn.uk@gmail.com" className="text-emerald-600 underline dark:text-emerald-400">ravisn.uk@gmail.com</a>
                                             </p>
                                             <p className="font-bold text-slate-900 dark:text-white">
                                                 Subject Line: <span className="font-mono text-emerald-700 dark:text-emerald-400">&quot;Data Deletion Request&quot;</span>
@@ -279,8 +294,12 @@ export default function DataDeletion() {
                 {/* Simple Footer */}
                 <footer className="border-t border-slate-200 bg-white py-8 text-center text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900">
                     <div className="mx-auto max-w-4xl px-4">
-                        <p>&copy; {new Date().getFullYear()} RAVISN. All rights reserved. Powered by Meta WhatsApp Cloud API.</p>
-                        <div className="mt-2 flex justify-center gap-4 text-slate-400">
+                        <p>&copy; {new Date().getFullYear()} RAVISN Technologies. All rights reserved. Powered by Meta WhatsApp Cloud API.</p>
+                        <div className="mt-2 flex flex-wrap justify-center gap-4 text-slate-400">
+                            <a href="https://ravisn.com" target="_blank" rel="noopener noreferrer" className="hover:text-emerald-600 dark:hover:text-emerald-400 font-medium">
+                                ravisn.com
+                            </a>
+                            <span>&bull;</span>
                             <Link href="/privacy" className="hover:text-slate-600 dark:hover:text-slate-200">
                                 Privacy Policy
                             </Link>

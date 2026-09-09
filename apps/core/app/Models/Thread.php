@@ -53,4 +53,10 @@ class Thread extends Model
     {
         return $this->hasMany(Message::class, 'thread_id')->orderBy('created_at', 'asc');
     }
+
+    public function latestMessage(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Message::class, 'thread_id')->latestOfMany('created_at');
+    }
 }
+

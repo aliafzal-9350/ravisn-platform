@@ -466,8 +466,12 @@ export default function ContactsIndex({
         {
             header: 'Notes',
             accessorKey: 'notes',
-            className: 'max-w-[250px] truncate text-muted-foreground text-xs',
-            cell: (row) => row.notes || '-',
+            className: 'text-muted-foreground text-xs',
+            cell: (row) => (
+                <div className="max-w-[220px] truncate text-muted-foreground" title={row.notes || ''}>
+                    {row.notes || '-'}
+                </div>
+            ),
         },
         {
             header: 'Actions',
@@ -1407,5 +1411,3 @@ export default function ContactsIndex({
         </>
     );
 }
-
-ContactsIndex.layout = (page: any) => page;

@@ -18,9 +18,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('whatsapp_accounts', function (Blueprint $table) {
+        if (! Schema::hasTable('whatsapp_accounts')) {
+            Schema::create('whatsapp_accounts', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->string('waba_id')->nullable();
             $table->string('app_id')->nullable();
             $table->string('app_secret')->nullable();
@@ -35,7 +36,8 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index(['tenant_id', 'status']);
-        });
+            });
+        }
     }
 
     /**

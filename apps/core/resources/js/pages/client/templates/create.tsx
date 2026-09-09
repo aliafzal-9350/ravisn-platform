@@ -1010,5 +1010,3 @@ export default function TemplateCreate({ accounts }: TemplateCreateProps) {
         </>
     );
 }
-
-TemplateCreate.layout = (page: any) => page;

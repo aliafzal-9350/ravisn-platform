@@ -20,7 +20,7 @@ return new class extends Migration
     {
         Schema::create('whatsapp_chats', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->foreignId('whatsapp_account_id')->constrained()->cascadeOnDelete();
             $table->string('customer_phone');
             $table->string('customer_name')->nullable();

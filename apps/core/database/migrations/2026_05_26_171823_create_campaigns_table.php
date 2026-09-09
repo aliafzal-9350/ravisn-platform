@@ -18,9 +18,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('campaigns', function (Blueprint $table) {
+        if (! Schema::hasTable('campaigns')) {
+            Schema::create('campaigns', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->cascadeOnDelete();
+            $table->string('tenant_id')->index();
             $table->foreignId('whatsapp_account_id')->constrained()->cascadeOnDelete();
             $table->foreignId('message_template_id')->nullable()->constrained()->cascadeOnDelete();
             $table->string('message_type')->default('template');
@@ -41,7 +42,8 @@ return new class extends Migration
 
             $table->index(['tenant_id', 'status']);
             $table->index(['status', 'scheduled_at']);
-        });
+            });
+        }
     }
 
     /**

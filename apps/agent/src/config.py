@@ -33,13 +33,25 @@ class Settings(BaseSettings):
     WHATSAPP_BUSINESS_ACCOUNT_ID: Optional[str] = None
     WHATSAPP_SYSTEM_USER_ACCESS_TOKEN: Optional[str] = None
 
-    # AI Models & Keys
+    # AI Models & Multi-Provider Priority Cascade
+    # 1. Primary: Groq
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_CHAT_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_WHISPER_MODEL: str = "whisper-large-v3"
+
+    # 2. Secondary: Google Gemini
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_CHAT_MODEL: str = "gemini-2.5-flash"
+
+    # 3. Tertiary: xAI Grok
+    XAI_API_KEY: Optional[str] = None
+    XAI_CHAT_MODEL: str = "grok-3-mini"
+
+    # 4. Quaternary: OpenAI
     OPENAI_API_KEY: Optional[str] = None
-    OPENAI_CHAT_MODEL: str = "gpt-4o"
+    OPENAI_CHAT_MODEL: str = "gpt-4o-mini"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     OPENAI_EMBEDDING_DIMENSIONS: int = 1536
-    GROQ_API_KEY: Optional[str] = None
-    GEMINI_API_KEY: Optional[str] = None
 
     # Security & CORS
     JWT_SECRET: str = "ravisn-secret-jwt-key"
