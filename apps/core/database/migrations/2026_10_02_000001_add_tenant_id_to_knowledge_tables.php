@@ -35,16 +35,35 @@ return new class extends Migration
     /**
      * Decide who owns knowledge created before tenancy existed.
      *
-     * Rows left with tenant_id = NULL are invisible to every tenant: no admin
-     * can see or edit them and no bot retrieves from them. That is the safe
-     * default this method keeps if it does nothing.
+     * 1. The platform's own RAVISN workspace, when it exists: the pre-tenancy
+     *    knowledge base holds RAVISN's agency content (see KnowledgeBaseSeeder).
+     * 2. Otherwise the only workspace, when there is exactly one.
+     * 3. Otherwise nobody. Unowned rows are invisible to every tenant (no admin
+     *    sees them, no bot retrieves from them), which is safer than guessing
+     *    and handing one client's knowledge to another.
+     *
+     * Public so the rule can be tested on its own.
      */
-    protected function claimLegacyKnowledge(): void
+    public function claimLegacyKnowledge(): void
     {
-        // TODO(owner decision): assign the pre-tenancy knowledge base(s), e.g.
-        //   - to the single tenant when only one exists,
-        //   - to the platform's own workspace (looked up by email), or
-        //   - leave them unowned (quarantined) and re-upload per tenant.
+        if (! DB::table('knowledge_bases')->whereNull('tenant_id')->exists()) {
+            return;
+        }
+
+        $owner = DB::table('tenants')->where('email', 'admin@ravisn.com')->value('id');
+
+        if ($owner === null && DB::table('tenants')->count() === 1) {
+            $owner = DB::table('tenants')->value('id');
+        }
+
+        if ($owner === null) {
+            return;
+        }
+
+        $legacyIds = DB::table('knowledge_bases')->whereNull('tenant_id')->pluck('id');
+
+        DB::table('knowledge_bases')->whereIn('id', $legacyIds)->update(['tenant_id' => (string) $owner]);
+        DB::table('knowledge_chunks')->whereIn('knowledge_base_id', $legacyIds)->update(['tenant_id' => (string) $owner]);
     }
 
     public function down(): void
