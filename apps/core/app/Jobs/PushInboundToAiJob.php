@@ -2,10 +2,14 @@
 
 namespace App\Jobs;
 
-use App\Models\ChannelIdentity;
+use App\Events\MessageCreatedEvent;
+use App\Events\MessageStatusUpdatedEvent;
 use App\Models\Contact;
 use App\Models\Message;
+use App\Models\Tenant;
 use App\Models\Thread;
+use App\Services\Inbox\InboundChannelResolver;
+use App\Services\Meta\WebhookEventDeduplicator;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -21,14 +25,97 @@ class PushInboundToAiJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public function __construct(
-        public array $payload
+        public array $payload,
+        public ?string $dedupKey = null
     ) {}
+
+    /**
+     * If processing fails, free the dedup claim so Meta's retry of this event
+     * is processed instead of being dropped as a duplicate.
+     */
+    public function failed(\Throwable $exception): void
+    {
+        app(WebhookEventDeduplicator::class)->release($this->dedupKey);
+    }
+
+    /**
+     * The tenant's Prompt Tuning settings, sent with each AI task so the agent
+     * answers in the tenant's own voice.
+     *
+     * @return array<string, mixed>
+     */
+    protected function aiConfig(?string $tenantId, Contact $contact): array
+    {
+        $tenant = $tenantId ? Tenant::find($tenantId) : null;
+        $settings = $tenant?->settings ?? [];
+
+        return array_filter([
+            'system_prompt' => $settings['system_prompt'] ?? null,
+            'ai_tone' => $settings['ai_tone'] ?? null,
+            'prohibited_topics' => $settings['prohibited_topics'] ?? null,
+            'temperature' => $settings['temperature'] ?? null,
+            'company_name' => $tenant?->name,
+            'contact_name' => $contact->name,
+        ], fn ($value) => $value !== null && $value !== '');
+    }
 
     public function handle(): void
     {
         $entry = $this->payload['entry'][0] ?? null;
         if (! $entry) {
             return;
+        }
+
+        // 0. WhatsApp Message Status Updates (sent, delivered, read)
+        if (isset($entry['changes'][0]['value']['statuses'])) {
+            $statuses = $entry['changes'][0]['value']['statuses'];
+            foreach ($statuses as $statusObj) {
+                $statusId = $statusObj['id'] ?? null;
+                $statusVal = $statusObj['status'] ?? null;
+                if (! $statusId || ! $statusVal) {
+                    continue;
+                }
+
+                $newStatus = match ($statusVal) {
+                    'sent' => 'sent',
+                    'delivered' => 'delivered',
+                    'read' => 'read',
+                    'failed' => 'failed',
+                    default => null,
+                };
+
+                if ($newStatus) {
+                    $msg = Message::where('external_message_id', $statusId)->first();
+                    if ($msg) {
+                        $msg->update(['status' => $newStatus]);
+                        $tenantId = $msg->thread?->tenantId() ?? $msg->contact?->tenant_id;
+
+                        // Broadcast to Reverb
+                        MessageStatusUpdatedEvent::dispatch(
+                            (string) $msg->id,
+                            (string) $msg->thread_id,
+                            $newStatus,
+                            $tenantId ? (string) $tenantId : null
+                        );
+
+                        // Publish to Redis
+                        try {
+                            Redis::publish(
+                                config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
+                                json_encode([
+                                    'event' => 'MessageStatusUpdated',
+                                    'thread_id' => (string) $msg->thread_id,
+                                    'message_id' => (string) $msg->id,
+                                    'status' => $newStatus,
+                                    'tenant_id' => $tenantId ? (string) $tenantId : null,
+                                ])
+                            );
+                        } catch (\Throwable $e) {
+                            Log::warning('[PushInboundToAiJob] Redis status broadcast skipped: ' . $e->getMessage());
+                        }
+                    }
+                }
+            }
         }
 
         // 1. WhatsApp Inbound Messages
@@ -39,28 +126,30 @@ class PushInboundToAiJob implements ShouldQueue
             $senderPhone = $rawMsg['from'];
             $phoneId = $metadata['phone_number_id'] ?? null;
 
-            $channel = ChannelIdentity::where('external_id', $phoneId)->first();
+            $channel = app(InboundChannelResolver::class)->resolve('whatsapp', $phoneId);
             if (! $channel) {
-                // Fallback / Auto-register default channel if not exists
-                $channel = ChannelIdentity::firstOrCreate(
-                    ['external_id' => $phoneId ?: 'default_whatsapp'],
-                    [
-                        'channel_type' => 'whatsapp',
-                        'account_name' => 'Primary WhatsApp Channel',
-                        'access_token' => config('services.meta.whatsapp_system_token', env('WHATSAPP_SYSTEM_USER_ACCESS_TOKEN', 'token')),
-                        'webhook_verify_token' => config('services.meta.webhook_verify_token', env('META_WEBHOOK_VERIFY_TOKEN', 'token')),
-                        'is_active' => true,
-                    ]
-                );
+                return;
             }
 
             DB::transaction(function () use ($channel, $senderPhone, $rawMsg) {
-                $contact = Contact::where('phone_number', $senderPhone)
-                    ->orWhere('phone', $senderPhone)
+                // Idempotency guard: never process the same inbound message twice,
+                // even if the Redis dedup claim was lost or Meta retried much later.
+                if (! empty($rawMsg['id']) && Message::where('external_message_id', $rawMsg['id'])->where('direction', 'inbound')->exists()) {
+                    Log::info('[PushInboundToAiJob] Inbound message already processed, skipping: '.$rawMsg['id']);
+
+                    return;
+                }
+
+                $tenantId = $channel->tenant_id ? (string) $channel->tenant_id : null;
+
+                $contact = Contact::query()
+                    ->when($tenantId, fn ($query) => $query->where('tenant_id', $tenantId))
+                    ->where(fn ($query) => $query->where('phone_number', $senderPhone)->orWhere('phone', $senderPhone))
                     ->first();
 
                 if (! $contact) {
                     $contact = Contact::create([
+                        'tenant_id' => $tenantId,
                         'phone_number' => $senderPhone,
                         'phone' => $senderPhone,
                         'first_name' => $rawMsg['profile']['name'] ?? 'WhatsApp User',
@@ -98,6 +187,8 @@ class PushInboundToAiJob implements ShouldQueue
                     $content = $rawMsg['interactive'][$interactiveType]['title'] ?? $rawMsg['interactive'][$interactiveType]['id'] ?? '';
                 }
 
+                $contact->update(['last_inbound_at' => now()]);
+
                 $message = Message::create([
                     'thread_id' => $thread->id,
                     'contact_id' => $contact->id,
@@ -114,7 +205,68 @@ class PushInboundToAiJob implements ShouldQueue
 
                 $thread->update(['last_message_at' => now()]);
 
+                // Mandatory Opt-Out Logic: Regex check for ^(stop|unsubscribe|cancel)$ (case-insensitive)
+                $isOptOut = false;
+                if ($messageType === 'text' && is_string($content) && preg_match('/^(stop|unsubscribe|cancel)$/i', trim($content))) {
+                    $isOptOut = true;
+                    $contact->update(['opted_out' => true]);
+                    $thread->update(['bot_active' => false]);
+
+                    // Dispatch an internal system message to the thread ("Customer opted out")
+                    $systemMsg = Message::create([
+                        'thread_id' => $thread->id,
+                        'contact_id' => $contact->id,
+                        'direction' => 'outbound',
+                        'channel_type' => 'whatsapp',
+                        'message_type' => 'text',
+                        'content' => 'Customer opted out',
+                        'status' => 'delivered',
+                        'is_ai_generated' => false,
+                        'raw_payload' => ['system' => true, 'action' => 'opt_out'],
+                    ]);
+
+                    try {
+                        event(new MessageCreatedEvent($systemMsg));
+                    } catch (\Throwable $e) {
+                        Log::warning('[PushInboundToAiJob] Direct Reverb opt-out broadcast skipped: ' . $e->getMessage());
+                    }
+
+                    try {
+                        Redis::publish(
+                            config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
+                            json_encode([
+                                'event' => 'MessageCreated',
+                                'thread_id' => (string) $thread->id,
+                                'message_id' => (string) $systemMsg->id,
+                                'direction' => 'outbound',
+                                'channel' => 'whatsapp',
+                                'content' => 'Customer opted out',
+                                'sender' => 'System',
+                                'message' => [
+                                    'id' => (string) $systemMsg->id,
+                                    'thread_id' => (string) $thread->id,
+                                    'contact_id' => (string) $contact->id,
+                                    'direction' => 'outbound',
+                                    'channel_type' => 'whatsapp',
+                                    'content' => 'Customer opted out',
+                                    'is_ai_generated' => false,
+                                    'status' => 'delivered',
+                                    'created_at' => $systemMsg->created_at->toISOString(),
+                                ]
+                            ])
+                        );
+                    } catch (\Throwable $e) {
+                        Log::warning('[PushInboundToAiJob] Opt-out broadcast skipped: ' . $e->getMessage());
+                    }
+                }
+
                 // Notify CRM UI in real-time
+                try {
+                    event(new MessageCreatedEvent($message));
+                } catch (\Throwable $e) {
+                    Log::warning('[PushInboundToAiJob] Direct Reverb inbound broadcast skipped: ' . $e->getMessage());
+                }
+
                 try {
                     Redis::publish(
                         config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
@@ -143,8 +295,16 @@ class PushInboundToAiJob implements ShouldQueue
                     Log::warning('[PushInboundToAiJob] Redis Pub/Sub broadcast skipped: ' . $e->getMessage());
                 }
 
-                // Forward to AI Engine if bot handling is active
-                if ($thread->bot_active) {
+                // Task 3.1: Human Takeover Sentiment Trigger
+                $sentimentEngine = app(\App\Services\AI\AiIntelligenceEngine::class);
+                $sentimentEval = $sentimentEngine->evaluate((string) $content, $thread);
+                if ($sentimentEval['is_escalated']) {
+                    $sentimentEngine->triggerHumanEscalation($thread, $sentimentEval['reason'], $senderPhone);
+                }
+
+                // Forward to AI Engine if bot handling is active and customer hasn't opted out and not escalated
+                $thread->refresh();
+                if ($thread->bot_active && ! $isOptOut) {
                     $aiJobPayload = json_encode([
                         'event_id' => (string) Str::uuid(),
                         'channel' => 'whatsapp',
@@ -158,6 +318,7 @@ class PushInboundToAiJob implements ShouldQueue
                         'media_id' => $mediaId,
                         'mime_type' => $mimeType,
                         'access_token' => $channel->access_token,
+                        'ai_config' => $this->aiConfig($tenantId, $contact),
                         'timestamp' => now()->toISOString(),
                     ]);
 
@@ -175,25 +336,23 @@ class PushInboundToAiJob implements ShouldQueue
             $recipientId = $msgEvent['recipient']['id'] ?? null;
             $channelType = isset($entry['id']) && str_starts_with($entry['id'], 'instagram') ? 'instagram' : 'messenger';
 
-            $channel = ChannelIdentity::where('external_id', $recipientId)->first();
+            $channel = app(InboundChannelResolver::class)->resolve($channelType, $recipientId);
             if (! $channel) {
-                $channel = ChannelIdentity::firstOrCreate(
-                    ['external_id' => $recipientId ?: 'default_page'],
-                    [
-                        'channel_type' => $channelType,
-                        'account_name' => ucfirst($channelType) . ' Channel',
-                        'access_token' => env('FACEBOOK_PAGE_ACCESS_TOKEN', 'token'),
-                        'webhook_verify_token' => env('META_WEBHOOK_VERIFY_TOKEN', 'token'),
-                        'is_active' => true,
-                    ]
-                );
+                return;
             }
 
             if (isset($msgEvent['message'])) {
                 DB::transaction(function () use ($channel, $senderId, $msgEvent, $channelType) {
+                    if (! empty($msgEvent['message']['mid']) && Message::where('external_message_id', $msgEvent['message']['mid'])->where('direction', 'inbound')->exists()) {
+                        Log::info('[PushInboundToAiJob] Inbound message already processed, skipping: '.$msgEvent['message']['mid']);
+
+                        return;
+                    }
+
                     $column = $channelType === 'instagram' ? 'instagram_igsid' : 'messenger_psid';
+                    $tenantId = $channel->tenant_id ? (string) $channel->tenant_id : null;
                     $contact = Contact::firstOrCreate(
-                        [$column => $senderId],
+                        [$column => $senderId, 'tenant_id' => $tenantId],
                         ['first_name' => ucfirst($channelType) . ' User']
                     );
 
@@ -208,6 +367,8 @@ class PushInboundToAiJob implements ShouldQueue
                             'bot_active' => true,
                         ]
                     );
+
+                    $contact->update(['last_inbound_at' => now()]);
 
                     $content = $msgEvent['message']['text'] ?? null;
                     $message = Message::create([
@@ -224,7 +385,67 @@ class PushInboundToAiJob implements ShouldQueue
 
                     $thread->update(['last_message_at' => now()]);
 
+                    // Mandatory Opt-Out Logic: Regex check for ^(stop|unsubscribe|cancel)$
+                    $isOptOut = false;
+                    if (is_string($content) && preg_match('/^(stop|unsubscribe|cancel)$/i', trim($content))) {
+                        $isOptOut = true;
+                        $contact->update(['opted_out' => true]);
+                        $thread->update(['bot_active' => false]);
+
+                        $systemMsg = Message::create([
+                            'thread_id' => $thread->id,
+                            'contact_id' => $contact->id,
+                            'direction' => 'outbound',
+                            'channel_type' => $channelType,
+                            'message_type' => 'text',
+                            'content' => 'Customer opted out',
+                            'status' => 'delivered',
+                            'is_ai_generated' => false,
+                            'raw_payload' => ['system' => true, 'action' => 'opt_out'],
+                        ]);
+
+                        try {
+                            event(new MessageCreatedEvent($systemMsg));
+                        } catch (\Throwable $e) {
+                            Log::warning('[PushInboundToAiJob] Direct Reverb opt-out broadcast skipped: ' . $e->getMessage());
+                        }
+
+                        try {
+                            Redis::publish(
+                                config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
+                                json_encode([
+                                    'event' => 'MessageCreated',
+                                    'thread_id' => (string) $thread->id,
+                                    'message_id' => (string) $systemMsg->id,
+                                    'direction' => 'outbound',
+                                    'channel' => $channelType,
+                                    'content' => 'Customer opted out',
+                                    'sender' => 'System',
+                                    'message' => [
+                                        'id' => (string) $systemMsg->id,
+                                        'thread_id' => (string) $thread->id,
+                                        'contact_id' => (string) $contact->id,
+                                        'direction' => 'outbound',
+                                        'channel_type' => $channelType,
+                                        'content' => 'Customer opted out',
+                                        'is_ai_generated' => false,
+                                        'status' => 'delivered',
+                                        'created_at' => $systemMsg->created_at->toISOString(),
+                                    ]
+                                ])
+                            );
+                        } catch (\Throwable $e) {
+                            Log::warning('[PushInboundToAiJob] Opt-out broadcast skipped: ' . $e->getMessage());
+                        }
+                    }
+
                     // Notify CRM UI in real-time
+                    try {
+                        event(new MessageCreatedEvent($message));
+                    } catch (\Throwable $e) {
+                        Log::warning('[PushInboundToAiJob] Direct Reverb inbound broadcast skipped: ' . $e->getMessage());
+                    }
+
                     try {
                         Redis::publish(
                             config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
@@ -253,7 +474,15 @@ class PushInboundToAiJob implements ShouldQueue
                         Log::warning('[PushInboundToAiJob] Redis Pub/Sub broadcast skipped: ' . $e->getMessage());
                     }
 
-                    if ($thread->bot_active) {
+                    // Task 3.1: Human Takeover Sentiment Trigger
+                    $sentimentEngine = app(\App\Services\AI\AiIntelligenceEngine::class);
+                    $sentimentEval = $sentimentEngine->evaluate((string) $content, $thread);
+                    if ($sentimentEval['is_escalated']) {
+                        $sentimentEngine->triggerHumanEscalation($thread, $sentimentEval['reason'], $senderId);
+                    }
+
+                    $thread->refresh();
+                    if ($thread->bot_active && ! $isOptOut) {
                         $aiJobPayload = json_encode([
                             'event_id' => (string) Str::uuid(),
                             'channel' => $channelType,
@@ -266,6 +495,7 @@ class PushInboundToAiJob implements ShouldQueue
                             'content' => $content,
                             'media_id' => null,
                             'access_token' => $channel->access_token,
+                            'ai_config' => $this->aiConfig($tenantId, $contact),
                             'timestamp' => now()->toISOString(),
                         ]);
 

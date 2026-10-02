@@ -1,14 +1,18 @@
+import io
+import zipfile
+import xml.etree.ElementTree as ET
 import uuid
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
+import pypdf
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.deps import get_db
 from src.db.models import KnowledgeBase, KnowledgeChunk
-from src.services.embedding_service import EmbeddingService
+from src.services.embedding_service import EmbeddingService, EmbeddingUnavailableError
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +102,11 @@ class KnowledgeEntryUpdate(BaseModel):
 @router.post("/embed")
 async def generate_text_embedding(req: EmbedRequest):
     """Generate 1536-dimensional vector embedding for text."""
-    embedding = await EmbeddingService.generate_embedding(req.text)
+    try:
+        embedding = await EmbeddingService.generate_embedding(req.text)
+    except EmbeddingUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {e}")
+
     return {
         "embedding": embedding,
         "dimensions": len(embedding),
@@ -126,7 +134,10 @@ async def create_knowledge_entry(entry_in: KnowledgeEntryCreate, db: AsyncSessio
         kb_id = str(default_kb.id)
 
     formatted_content = f"Question: {entry_in.question}\n\nAnswer: {entry_in.answer}"
-    embedding_vector = await EmbeddingService.generate_embedding(formatted_content)
+    try:
+        embedding_vector = await EmbeddingService.generate_embedding(formatted_content)
+    except EmbeddingUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {e}")
 
     meta = {
         **(entry_in.metadata or {}),
@@ -170,7 +181,10 @@ async def update_knowledge_entry(chunk_id: str, entry_in: KnowledgeEntryUpdate, 
     current_a = entry_in.answer or meta.get("answer", chunk.content)
 
     formatted_content = f"Question: {current_q}\n\nAnswer: {current_a}"
-    embedding_vector = await EmbeddingService.generate_embedding(formatted_content)
+    try:
+        embedding_vector = await EmbeddingService.generate_embedding(formatted_content)
+    except EmbeddingUnavailableError as e:
+        raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {e}")
 
     meta.update({
         **(entry_in.metadata or {}),
@@ -244,7 +258,14 @@ async def ingest_document(doc_in: KnowledgeDocumentCreate, db: AsyncSession = De
     created_chunks = []
 
     for i, chunk_text in enumerate(chunks):
-        embedding_vector = await EmbeddingService.generate_embedding(chunk_text)
+        try:
+            embedding_vector = await EmbeddingService.generate_embedding(chunk_text)
+        except EmbeddingUnavailableError as e:
+            # Nothing has been committed yet (db.add() only stages pending
+            # rows) — raising here means zero chunks get indexed, rather
+            # than silently persisting some real and some fake vectors.
+            raise HTTPException(status_code=503, detail=f"Embedding provider unavailable: {e}")
+
         chunk_meta = {
             **(doc_in.metadata or {}),
             "title": doc_in.title,
@@ -269,3 +290,57 @@ async def ingest_document(doc_in: KnowledgeDocumentCreate, db: AsyncSession = De
         "chunks_indexed": len(created_chunks),
         "embedding_model": "text-embedding-3-small"
     }
+
+
+@router.post("/parse-file")
+async def parse_document_file(file: UploadFile = File(...)):
+    """Extract clean text from uploaded .pdf, .docx, .txt, or .csv files."""
+    filename = file.filename or "uploaded_file"
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    lower_name = filename.lower()
+    extracted_text = ""
+    page_count = 1
+
+    try:
+        if lower_name.endswith(".pdf"):
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            page_count = len(reader.pages)
+            pages_text = [page.extract_text() or "" for page in reader.pages]
+            extracted_text = "\n\n".join(pages_text).strip()
+
+        elif lower_name.endswith(".docx") or lower_name.endswith(".doc"):
+            with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
+                xml_content = z.read("word/document.xml")
+                tree = ET.fromstring(xml_content)
+                namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+                paragraphs = []
+                for p in tree.findall(".//w:p", namespaces):
+                    texts = [node.text for node in p.findall(".//w:t", namespaces) if node.text]
+                    if texts:
+                        paragraphs.append("".join(texts))
+                extracted_text = "\n\n".join(paragraphs).strip()
+
+        elif lower_name.endswith(".txt") or lower_name.endswith(".csv"):
+            extracted_text = file_bytes.decode("utf-8", errors="replace").strip()
+
+        else:
+            extracted_text = file_bytes.decode("utf-8", errors="replace").strip()
+
+    except Exception as e:
+        logger.error(f"[KnowledgeAPI] File parsing error for {filename}: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse document: {str(e)}")
+
+    if not extracted_text:
+        raise HTTPException(status_code=422, detail="No readable text could be extracted from this document.")
+
+    return {
+        "status": "success",
+        "filename": filename,
+        "page_count": page_count,
+        "character_count": len(extracted_text),
+        "text": extracted_text,
+    }
+

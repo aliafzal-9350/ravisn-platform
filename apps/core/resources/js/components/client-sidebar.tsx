@@ -1,4 +1,4 @@
-import { Link } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
 import {
     ArrowLeftRight,
     BookOpen,
@@ -10,6 +10,7 @@ import {
     Settings,
     Sliders,
     Terminal,
+    UserCog,
     Users,
     Workflow,
 } from 'lucide-react';
@@ -28,14 +29,18 @@ import {
 import { useCurrentUrl } from '@/hooks/use-current-url';
 import type { NavItem } from '@/types';
 
-const navItems: NavItem[] = [
+type WorkspaceNavItem = NavItem & { adminOnly?: boolean };
+
+const navItems: WorkspaceNavItem[] = [
     {
         title: 'Dashboard',
+        adminOnly: true,
         href: '/dashboard',
         icon: LayoutDashboard,
     },
     {
         title: 'Connect',
+        adminOnly: true,
         href: '/dashboard/connect',
         icon: ArrowLeftRight,
     },
@@ -51,38 +56,51 @@ const navItems: NavItem[] = [
     },
     {
         title: 'Campaigns',
+        adminOnly: true,
         href: '/dashboard/campaigns',
         icon: Megaphone,
     },
     {
         title: 'Automations',
+        adminOnly: true,
         href: '/dashboard/automations',
         icon: Workflow,
     },
     {
         title: 'Templates',
+        adminOnly: true,
         href: '/dashboard/templates',
         icon: FileText,
     },
     {
         title: 'Bookings',
+        adminOnly: true,
         href: '/dashboard/bookings',
         icon: Calendar,
     },
     {
         title: 'Knowledge Base',
+        adminOnly: true,
         href: '/dashboard/knowledge',
         icon: BookOpen,
     },
     {
         title: 'System Prompt Tuning',
+        adminOnly: true,
         href: '/dashboard/prompt-tuning',
         icon: Sliders,
     },
     {
         title: 'Developer API',
+        adminOnly: true,
         href: '/dashboard/developer',
         icon: Terminal,
+    },
+    {
+        title: 'Team',
+        href: '/dashboard/team',
+        icon: UserCog,
+        adminOnly: true,
     },
     {
         title: 'Settings',
@@ -93,6 +111,8 @@ const navItems: NavItem[] = [
 
 export function ClientSidebar() {
     const { isCurrentUrl } = useCurrentUrl();
+    const role = usePage<{ auth: { role?: string } }>().props.auth.role;
+    const visibleItems = navItems.filter((item) => !item.adminOnly || role === 'admin');
 
     return (
         <Sidebar collapsible="icon" variant="inset" className="border-r border-sidebar-border">
@@ -111,7 +131,7 @@ export function ClientSidebar() {
             <SidebarContent className="px-2 py-1 overflow-x-hidden">
                 <SidebarGroup className="p-0">
                     <SidebarMenu className="gap-0.5">
-                        {navItems.map((item) => {
+                        {visibleItems.map((item) => {
                             const active = isCurrentUrl(item.href);
                             const Icon = item.icon;
                             return (

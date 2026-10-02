@@ -20,11 +20,41 @@ class ChannelController extends Controller
     ) {}
 
     /**
+     * The authenticated user's tenant. Channels are always read and written
+     * within it, so one tenant can never see or overwrite another's channels.
+     */
+    protected function tenantId(Request $request): string
+    {
+        $tenantId = $request->user()?->tenant_id;
+
+        abort_if($tenantId === null, 403, 'Your account is not attached to a workspace.');
+
+        return (string) $tenantId;
+    }
+
+    /**
+     * A Meta asset (phone number / page / IG account) can only belong to one tenant.
+     */
+    protected function assertAssetNotOwnedByAnotherTenant(?string $externalId, string $tenantId): void
+    {
+        if (! $externalId) {
+            return;
+        }
+
+        $ownedElsewhere = ChannelIdentity::where('external_id', $externalId)
+            ->where(fn ($query) => $query->whereNull('tenant_id')->orWhere('tenant_id', '!=', $tenantId))
+            ->where('is_active', true)
+            ->exists();
+
+        abort_if($ownedElsewhere, 422, 'This account is already connected to another workspace.');
+    }
+
+    /**
      * Display the Meta Channel Connections Hub.
      */
     public function index(Request $request): Response
     {
-        $channels = ChannelIdentity::all()->keyBy('channel_type');
+        $channels = ChannelIdentity::forTenant($this->tenantId($request))->get()->keyBy('channel_type');
 
         $whatsapp = $channels->get('whatsapp');
         $instagram = $channels->get('instagram');
@@ -109,7 +139,7 @@ class ChannelController extends Controller
      */
     public function sync(Request $request): JsonResponse|RedirectResponse
     {
-        $channels = ChannelIdentity::where('is_active', true)->get();
+        $channels = ChannelIdentity::forTenant($this->tenantId($request))->where('is_active', true)->get();
         $syncedCount = 0;
 
         foreach ($channels as $channel) {
@@ -235,10 +265,13 @@ class ChannelController extends Controller
         $phoneNumber = $phoneNumber ?: 'Connected WhatsApp Number';
         $businessName = $businessName ?: 'WhatsApp Business Account';
 
+        $tenantId = $this->tenantId($request);
+        $this->assertAssetNotOwnedByAnotherTenant($phoneId, $tenantId);
+
         $verifyToken = config('services.meta.verify_token', env('META_VERIFY_TOKEN', 'meta-verify-token-prod'));
 
         $channel = ChannelIdentity::updateOrCreate(
-            ['channel_type' => 'whatsapp'],
+            ['tenant_id' => $tenantId, 'channel_type' => 'whatsapp'],
             [
                 'account_name' => $phoneNumber,
                 'external_id' => $phoneId,
@@ -371,8 +404,11 @@ class ChannelController extends Controller
 
         $verifyToken = config('services.meta.verify_token', env('META_VERIFY_TOKEN', 'meta-verify-token-prod'));
 
+        $tenantId = $this->tenantId($request);
+        $this->assertAssetNotOwnedByAnotherTenant($externalId, $tenantId);
+
         $channel = ChannelIdentity::updateOrCreate(
-            ['channel_type' => $channelType],
+            ['tenant_id' => $tenantId, 'channel_type' => $channelType],
             [
                 'account_name' => $accountName,
                 'access_token' => $token,
@@ -407,7 +443,7 @@ class ChannelController extends Controller
             'verify_token' => ['required', 'string', 'min:8', 'max:255'],
         ]);
 
-        ChannelIdentity::query()->update([
+        ChannelIdentity::forTenant($this->tenantId($request))->update([
             'webhook_verify_token' => $validated['verify_token'],
         ]);
 
@@ -429,11 +465,14 @@ class ChannelController extends Controller
      */
     public function disconnect(Request $request, string $channel): JsonResponse|RedirectResponse
     {
-        $query = ChannelIdentity::where('channel_type', $channel);
-        if (\Illuminate\Support\Str::isUuid($channel)) {
-            $query->orWhere('id', $channel);
-        }
-        $record = $query->first();
+        $record = ChannelIdentity::forTenant($this->tenantId($request))
+            ->where(function ($query) use ($channel) {
+                $query->where('channel_type', $channel);
+                if (\Illuminate\Support\Str::isUuid($channel)) {
+                    $query->orWhere('id', $channel);
+                }
+            })
+            ->first();
 
         if ($record) {
             $record->update([

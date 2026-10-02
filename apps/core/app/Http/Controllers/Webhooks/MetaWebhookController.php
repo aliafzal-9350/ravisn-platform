@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Webhooks;
 use App\Http\Controllers\Controller;
 use App\Jobs\PushInboundToAiJob;
 use App\Services\Meta\MetaSignatureValidator;
+use App\Services\Meta\WebhookEventDeduplicator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -13,7 +14,8 @@ use Illuminate\Support\Facades\Log;
 class MetaWebhookController extends Controller
 {
     public function __construct(
-        protected MetaSignatureValidator $validator
+        protected MetaSignatureValidator $validator,
+        protected WebhookEventDeduplicator $deduplicator
     ) {}
 
     /**
@@ -67,8 +69,18 @@ class MetaWebhookController extends Controller
 
         $payload = $request->json()->all();
 
+        // Split the delivery into single events and drop Meta retries atomically,
+        // before any AI inference is queued.
+        $events = $this->deduplicator->newEvents($payload);
+
+        if (empty($events)) {
+            return response()->json(['status' => 'EVENT_RECEIVED', 'duplicate' => true], 200);
+        }
+
         // Dispatch background processing immediately
-        PushInboundToAiJob::dispatch($payload);
+        foreach ($events as $event) {
+            PushInboundToAiJob::dispatch($event['payload'], $event['redis_key']);
+        }
 
         // Immediate acknowledgment required by Meta
         return response()->json(['status' => 'EVENT_RECEIVED'], 200);

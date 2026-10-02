@@ -8,6 +8,7 @@ use App\Models\Contact;
 use App\Models\Message;
 use App\Models\Thread;
 use Carbon\CarbonPeriod;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -21,7 +22,7 @@ class DashboardController extends Controller
     /**
      * Display the enterprise-grade dual-engine operational dashboard.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $user = Auth::user();
 
@@ -34,9 +35,14 @@ class DashboardController extends Controller
             ]);
             $user->update([
                 'tenant_id' => $tenant->id,
-                'role' => 'client',
+                'role' => \App\Models\User::ROLE_ADMIN,
             ]);
             $user->refresh();
+        }
+
+        // Agents work from the inbox; the analytics dashboard is an admin surface.
+        if ($user->isAgent()) {
+            return redirect()->route('client.inbox.index');
         }
 
         $tenantId = $user->current_team_id ?? $user->tenant_id ?? $user->id;

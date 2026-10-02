@@ -2,20 +2,27 @@
 
 namespace App\Http\Controllers\Client;
 
+use App\Exceptions\EmbeddingUnavailableException;
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessKnowledgeIngestionJob;
 use App\Models\KnowledgeBase;
 use App\Models\KnowledgeChunk;
+use App\Models\KnowledgeIngestionJob;
+use App\Services\AI\EmbeddingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class KnowledgeController extends Controller
 {
+    public function __construct(
+        protected EmbeddingService $embeddingService
+    ) {}
+
     /**
      * Display Knowledge Base Manager.
      */
@@ -99,7 +106,11 @@ class KnowledgeController extends Controller
         $content = "Question: {$question}\n\nAnswer: {$answer}";
 
         // Generate vector embedding
-        $embedding = $this->getEmbedding($content);
+        try {
+            $embedding = $this->embeddingService->embed($content);
+        } catch (EmbeddingUnavailableException $e) {
+            return $this->embeddingUnavailableResponse($request, $e);
+        }
 
         $meta = [
             'type' => 'qa',
@@ -117,7 +128,7 @@ class KnowledgeController extends Controller
 
         // Save embedding vector in pgvector column if running PostgreSQL
         if (DB::getDriverName() === 'pgsql' && ! empty($embedding)) {
-            $vectorString = '[' . implode(',', $embedding) . ']';
+            $vectorString = '['.implode(',', $embedding).']';
             DB::statement('UPDATE knowledge_chunks SET embedding = ?::vector WHERE id = ?', [$vectorString, $chunk->id]);
         }
 
@@ -155,7 +166,11 @@ class KnowledgeController extends Controller
         $answer = trim($validated['answer']);
         $content = "Question: {$question}\n\nAnswer: {$answer}";
 
-        $embedding = $this->getEmbedding($content);
+        try {
+            $embedding = $this->embeddingService->embed($content);
+        } catch (EmbeddingUnavailableException $e) {
+            return $this->embeddingUnavailableResponse($request, $e);
+        }
 
         $meta = is_array($chunk->metadata) ? $chunk->metadata : [];
         $meta['question'] = $question;
@@ -169,7 +184,7 @@ class KnowledgeController extends Controller
         ]);
 
         if (DB::getDriverName() === 'pgsql' && ! empty($embedding)) {
-            $vectorString = '[' . implode(',', $embedding) . ']';
+            $vectorString = '['.implode(',', $embedding).']';
             DB::statement('UPDATE knowledge_chunks SET embedding = ?::vector WHERE id = ?', [$vectorString, $chunk->id]);
         }
 
@@ -235,122 +250,93 @@ class KnowledgeController extends Controller
     }
 
     /**
-     * Ingest a document (CSV, PDF, DOCX, TXT) and create embeddings.
+     * Ingest a document (CSV, PDF, DOCX, TXT). File uploads are processed
+     * asynchronously by ProcessKnowledgeIngestionJob so the UI can show real
+     * parse/chunk/embed progress; pasted-in text content (no file) is small
+     * enough to embed synchronously.
      */
     public function upload(Request $request): JsonResponse|RedirectResponse
     {
         $request->validate([
             'title' => ['nullable', 'string', 'max:255'],
             'content' => ['nullable', 'string'],
-            'file' => ['nullable', 'file', 'mimes:txt,csv,pdf,doc,docx', 'max:10240'],
+            'file' => ['nullable', 'file', 'mimes:txt,csv,pdf,doc,docx', 'max:15360'],
         ]);
 
         $kb = $this->getOrCreateKnowledgeBase();
         $title = $request->input('title');
         $content = $request->input('content');
-        $extension = '';
 
         if ($request->hasFile('file')) {
             $file = $request->file('file');
             $title = $title ?: $file->getClientOriginalName();
-            $extension = strtolower($file->getClientOriginalExtension());
+            $storedPath = $file->store('kb-uploads', 'local');
 
-            if ($extension === 'csv') {
-                // Parse CSV rows into Q&A entries
-                $rows = array_map('str_getcsv', file($file->getRealPath()));
-                $header = array_shift($rows);
-                $qIdx = 0;
-                $aIdx = 1;
+            $ingestionJob = KnowledgeIngestionJob::create([
+                'knowledge_base_id' => $kb->id,
+                'uploaded_by_user_id' => $request->user()?->id,
+                'title' => $title,
+                'original_filename' => $file->getClientOriginalName(),
+                'file_path' => $storedPath,
+                'status' => 'pending',
+            ]);
 
-                if ($header) {
-                    $lowerHeader = array_map('strtolower', array_map('trim', $header));
-                    foreach ($lowerHeader as $i => $col) {
-                        if (in_array($col, ['question', 'q', 'prompt', 'title'])) {
-                            $qIdx = $i;
-                        }
-                        if (in_array($col, ['answer', 'a', 'reply', 'response', 'content'])) {
-                            $aIdx = $i;
-                        }
-                    }
-                }
+            ProcessKnowledgeIngestionJob::dispatch((string) $ingestionJob->id);
 
-                $inserted = 0;
-                foreach ($rows as $row) {
-                    if (empty($row) || ! isset($row[$qIdx]) || ! isset($row[$aIdx])) {
-                        continue;
-                    }
-                    $q = trim((string) $row[$qIdx]);
-                    $a = trim((string) $row[$aIdx]);
-                    if (! empty($q) && ! empty($a)) {
-                        $chunkContent = "Question: {$q}\n\nAnswer: {$a}";
-                        $embedding = $this->getEmbedding($chunkContent);
-                        $chunk = KnowledgeChunk::create([
-                            'knowledge_base_id' => $kb->id,
-                            'content' => $chunkContent,
-                            'metadata' => [
-                                'type' => 'qa',
-                                'question' => $q,
-                                'answer' => $a,
-                                'title' => $q,
-                                'source' => $title,
-                            ],
-                        ]);
-                        if (DB::getDriverName() === 'pgsql' && ! empty($embedding)) {
-                            $vecStr = '[' . implode(',', $embedding) . ']';
-                            DB::statement('UPDATE knowledge_chunks SET embedding = ?::vector WHERE id = ?', [$vecStr, $chunk->id]);
-                        }
-                        $inserted++;
-                    }
-                }
-
-                return response()->json([
-                    'status' => 'success',
-                    'message' => "Successfully parsed and indexed {$inserted} Q&A entries from CSV.",
-                ]);
-            }
-
-            if ($extension === 'txt') {
-                $content = file_get_contents($file->getRealPath());
-            } else {
-                // PDF / DOCX basic text extraction
-                $content = @file_get_contents($file->getRealPath());
-                $content = preg_replace('/[^\x20-\x7E\t\r\n]/', ' ', (string) $content);
-            }
+            return response()->json([
+                'status' => 'processing',
+                'job_id' => (string) $ingestionJob->id,
+                'document_title' => $title,
+            ]);
         }
 
         if (empty(trim((string) $content))) {
             return response()->json(['error' => 'Document content cannot be empty.'], 422);
         }
 
-        $agentUrl = config('services.agent.url', env('AGENT_API_URL', 'http://agent:8000'));
+        $chunks = [];
+        $len = mb_strlen($content);
+        $start = 0;
+        while ($start < $len) {
+            $chunkText = trim(mb_substr($content, $start, 600));
+            if (! empty($chunkText)) {
+                $chunks[] = $chunkText;
+            }
+            $start += 520; // 600 - 80 overlap
+        }
 
         try {
-            $response = Http::timeout(30)->post("{$agentUrl}/api/v1/knowledge/document", [
-                'knowledge_base_id' => (string) $kb->id,
-                'title' => $title ?: 'Uploaded Document',
-                'content' => $content,
-                'chunk_size' => 600,
-                'chunk_overlap' => 80,
-                'metadata' => [
-                    'source' => 'web_admin',
-                    'title' => $title ?: 'Uploaded Document',
-                ],
-            ]);
-
-            if ($response->successful()) {
-                return response()->json([
-                    'status' => 'success',
-                    'message' => 'Document successfully chunked, embedded, and indexed in pgvector.',
-                    'data' => $response->json(),
+            $insertedCount = 0;
+            foreach ($chunks as $idx => $chunkText) {
+                $embedding = $this->embeddingService->embed($chunkText);
+                $chunk = KnowledgeChunk::create([
+                    'knowledge_base_id' => $kb->id,
+                    'content' => $chunkText,
+                    'metadata' => [
+                        'source' => $title ?: 'Pasted Content',
+                        'chunk_index' => $idx,
+                        'total_chunks' => count($chunks),
+                        'title' => $title ?: 'Pasted Content',
+                    ],
                 ]);
-            } else {
-                Log::error('[KnowledgeController] Agent API returned error: ' . $response->body());
-                return response()->json(['error' => 'FastAPI Agent indexing failed: ' . $response->body()], 500);
+
+                if (DB::getDriverName() === 'pgsql') {
+                    $vecStr = '['.implode(',', $embedding).']';
+                    DB::statement('UPDATE knowledge_chunks SET embedding = ?::vector WHERE id = ?', [$vecStr, $chunk->id]);
+                }
+                $insertedCount++;
             }
-        } catch (\Throwable $e) {
-            Log::error('[KnowledgeController] Exception connecting to Agent: ' . $e->getMessage());
-            return response()->json(['error' => 'Failed to connect to AI Agent: ' . $e->getMessage()], 500);
+        } catch (EmbeddingUnavailableException $e) {
+            return $this->embeddingUnavailableResponse($request, $e);
         }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "Document successfully parsed and stored: {$insertedCount} chunks indexed in pgvector.",
+            'chunks_count' => $insertedCount,
+            'char_count' => $len,
+            'document_title' => $title ?: 'Pasted Content',
+        ]);
     }
 
     /**
@@ -381,40 +367,20 @@ class KnowledgeController extends Controller
     }
 
     /**
-     * Generate 1536-dimensional vector embedding with fallback.
+     * Build a clear failure response when the AI embedding service is
+     * unavailable, instead of silently indexing a non-semantic placeholder
+     * vector that would quietly break RAG retrieval later.
      */
-    private function getEmbedding(string $text): array
+    private function embeddingUnavailableResponse(Request $request, EmbeddingUnavailableException $e): JsonResponse|RedirectResponse
     {
-        $agentUrl = config('services.agent.url', env('AGENT_API_URL', 'http://agent:8000'));
-        try {
-            $response = Http::timeout(10)->post("{$agentUrl}/api/v1/knowledge/embed", [
-                'text' => $text,
-            ]);
-            if ($response->successful() && ! empty($response->json('embedding'))) {
-                return $response->json('embedding');
-            }
-        } catch (\Throwable $e) {
-            Log::warning('[KnowledgeController] Agent embed call failed: ' . $e->getMessage());
+        Log::error('[KnowledgeController] Embedding unavailable: '.$e->getMessage());
+
+        $message = 'AI embedding service is currently unavailable. Your content was not indexed. Please try again shortly.';
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json(['error' => $message], 503);
         }
 
-        // Deterministic pseudo-embedding fallback (1536 dimensions, normalized)
-        $dim = 1536;
-        $vec = array_fill(0, $dim, 0.0);
-        $words = preg_split('/\s+/', strtolower($text));
-        foreach ($words as $word) {
-            if (! empty($word)) {
-                $h = hexdec(substr(md5($word), 0, 8));
-                $idx = $h % $dim;
-                $vec[$idx] += 1.0;
-            }
-        }
-        $norm = sqrt(array_sum(array_map(fn ($x) => $x * $x, $vec)));
-        if ($norm > 0) {
-            $vec = array_map(fn ($x) => $x / $norm, $vec);
-        } else {
-            $vec[0] = 1.0;
-        }
-
-        return $vec;
+        return back()->with('toast', ['type' => 'error', 'message' => $message]);
     }
 }

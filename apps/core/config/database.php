@@ -100,7 +100,7 @@ return [
             'charset' => env('DB_CHARSET', 'utf8'),
             'prefix' => '',
             'prefix_indexes' => true,
-            'search_path' => 'public',
+            'search_path' => env('DB_SEARCH_PATH', 'public'),
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
@@ -169,6 +169,11 @@ return [
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
             'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
+            // -1 = wait indefinitely. Without this, the long-lived Redis::subscribe()
+            // connection used by `crm:listen-updates` (bridging escalation/message
+            // events into Reverb broadcasts) hits phpredis's default read timeout
+            // during quiet periods and crash-loops every ~60s of inactivity.
+            'read_timeout' => env('REDIS_READ_TIMEOUT', -1),
         ],
 
         'cache' => [

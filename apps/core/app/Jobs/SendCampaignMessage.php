@@ -32,13 +32,16 @@ class SendCampaignMessage implements ShouldQueue
     {
         // 1. Skip if contact opted out
         $contact = Contact::where('tenant_id', $this->campaign->tenant_id)
-            ->where('phone', $this->recipient->phone_number)
+            ->where(function ($q) {
+                $q->where('phone', $this->recipient->phone_number)
+                    ->orWhere('phone_number', $this->recipient->phone_number);
+            })
             ->first();
 
-        if ($contact && ($contact->is_opted_out ?? false)) {
+        if ($contact && ($contact->opted_out || ($contact->is_opted_out ?? false))) {
             $this->recipient->update([
                 'status' => 'failed',
-                'error_message' => 'Contact previously opted out (STOP).',
+                'error_message' => 'Contact opted out.',
             ]);
             $this->campaign->increment('failed_count');
             $this->checkCampaignCompleted();

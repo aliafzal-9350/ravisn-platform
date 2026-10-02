@@ -8,13 +8,23 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'email', 'status', 'meta_business_id', 'webhook_token', 'ai_strategy'])]
+#[Fillable(['name', 'email', 'status', 'meta_business_id', 'webhook_token', 'ai_strategy', 'settings'])]
 class Tenant extends Model
 {
     /** @use HasFactory<TenantFactory> */
     use HasFactory;
 
 
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'settings' => 'array',
+        ];
+    }
 
     protected static function booted(): void
     {

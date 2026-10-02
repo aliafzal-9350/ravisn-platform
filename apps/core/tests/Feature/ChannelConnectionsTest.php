@@ -42,6 +42,7 @@ test('channel connections hub defaults to clean disconnected state when no chann
 
 test('channel connections page renders correctly with dynamic channel data', function () {
     ChannelIdentity::create([
+        'tenant_id' => $this->tenant->id,
         'channel_type' => 'whatsapp',
         'account_name' => '+1 564-222-6889',
         'external_id' => '5647382910842',
@@ -119,6 +120,7 @@ test('test ping endpoint dispatches successfully', function () {
 
 test('channel can be disconnected', function () {
     $channel = ChannelIdentity::create([
+        'tenant_id' => $this->tenant->id,
         'channel_type' => 'instagram',
         'account_name' => 'ravisn.ai',
         'external_id' => '9988776655443',

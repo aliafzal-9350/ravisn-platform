@@ -28,15 +28,10 @@ services:
     build:
       context: ./apps/core
       dockerfile: Dockerfile
+    image: ravisn-platform-core:latest
     container_name: ravisn-core
     env_file: .env
     environment:
-      - DB_CONNECTION=pgsql
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_DATABASE=${DB_DATABASE:-ravisn_db}
-      - DB_USERNAME=${DB_USERNAME:-ravisn_user}
-      - DB_PASSWORD=${DB_PASSWORD:-ravisn_secret_password}
       - REDIS_CLIENT=phpredis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -64,16 +59,11 @@ services:
     build:
       context: ./apps/core
       dockerfile: Dockerfile
+    image: ravisn-platform-core:latest
     container_name: ravisn-core-worker
     command: php artisan queue:work redis --queue=campaigns,webhooks,default --sleep=1 --tries=3 --max-time=3600
     env_file: .env
     environment:
-      - DB_CONNECTION=pgsql
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_DATABASE=${DB_DATABASE:-ravisn_db}
-      - DB_USERNAME=${DB_USERNAME:-ravisn_user}
-      - DB_PASSWORD=${DB_PASSWORD:-ravisn_secret_password}
       - REDIS_CLIENT=phpredis
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -94,12 +84,112 @@ services:
     mem_limit: 400m
 
   # ----------------------------------------------------------------------------
+  # 3a. Laravel Reverb Bridge (relays Redis Pub/Sub updates from the Python
+  #     agent and PHP escalation engine into Reverb broadcasts)
+  # ----------------------------------------------------------------------------
+  core-crm-listener:
+    build:
+      context: ./apps/core
+      dockerfile: Dockerfile
+    image: ravisn-platform-core:latest
+    container_name: ravisn-core-crm-listener
+    command: php artisan crm:listen-updates
+    env_file: .env
+    environment:
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_STORE=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
+      - APP_URL=${APP_URL:-http://localhost:8000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      core:
+        condition: service_started
+    volumes:
+      - ./apps/core:/var/www/html
+    restart: always
+    mem_limit: 200m
+
+  # ----------------------------------------------------------------------------
+  # 3c. Automation Workflow Trigger Consumer (Redis Stream -> WorkflowEngine)
+  # ----------------------------------------------------------------------------
+  core-automation-consumer:
+    build:
+      context: ./apps/core
+      dockerfile: Dockerfile
+    image: ravisn-platform-core:latest
+    container_name: ravisn-core-automation-consumer
+    command: php artisan automation:consume-triggers
+    env_file: .env
+    environment:
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_STORE=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
+      - APP_URL=${APP_URL:-http://localhost:8000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      core:
+        condition: service_started
+    volumes:
+      - ./apps/core:/var/www/html
+    restart: always
+    mem_limit: 200m
+
+  # ----------------------------------------------------------------------------
+  # 3b. Laravel Reverb (Real-Time WebSocket Broadcasting)
+  # ----------------------------------------------------------------------------
+  core-reverb:
+    build:
+      context: ./apps/core
+      dockerfile: Dockerfile
+    image: ravisn-platform-core:latest
+    container_name: ravisn-core-reverb
+    command: php artisan reverb:start --host=0.0.0.0 --port=8080
+    env_file: .env
+    environment:
+      - REDIS_CLIENT=phpredis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_STORE=redis
+      - SESSION_DRIVER=redis
+      - QUEUE_CONNECTION=redis
+      - APP_URL=${APP_URL:-http://localhost:8000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      core:
+        condition: service_started
+    volumes:
+      - ./apps/core:/var/www/html
+    ports:
+      - "8080:8080"
+    restart: always
+    mem_limit: 250m
+
+  # ----------------------------------------------------------------------------
   # 4. FastAPI Agent (Multi-Agent AI, LangGraph, RAG/pgvector, Inbound Intelligence)
   # ----------------------------------------------------------------------------
   agent:
     build:
       context: ./apps/agent
       dockerfile: Dockerfile
+    image: ravisn-platform-agent:latest
     container_name: ravisn-agent
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
     env_file: .env
@@ -133,6 +223,7 @@ services:
     build:
       context: ./apps/agent
       dockerfile: Dockerfile
+    image: ravisn-platform-agent:latest
     container_name: ravisn-agent-worker
     command: python -m src.workers.redis_consumer
     env_file: .env

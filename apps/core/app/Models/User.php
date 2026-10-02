@@ -43,6 +43,32 @@ class User extends Authenticatable implements PasskeyUser
         return $this->belongsTo(Tenant::class);
     }
 
+    public const ROLE_ADMIN = 'admin';
+
+    public const ROLE_AGENT = 'agent';
+
+    /**
+     * Workspace owners. The legacy "client" role predates roles and always
+     * meant the owner of a workspace, so it keeps full access.
+     */
+    public function isAdmin(): bool
+    {
+        return in_array($this->role, [self::ROLE_ADMIN, 'client'], true);
+    }
+
+    public function isAgent(): bool
+    {
+        return $this->role === self::ROLE_AGENT;
+    }
+
+    /**
+     * The role as the interface knows it: admin or agent.
+     */
+    public function workspaceRole(): string
+    {
+        return $this->isAgent() ? self::ROLE_AGENT : self::ROLE_ADMIN;
+    }
+
     /**
      * Determine if the user is a client.
      */

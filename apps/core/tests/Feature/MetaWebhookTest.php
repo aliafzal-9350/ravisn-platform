@@ -32,6 +32,7 @@ class MetaWebhookTest extends TestCase
     {
         Queue::fake();
 
+        $msgId = 'wamid.HBgLMTU1NTEyMzQ1NjcVAgASGBQzQT_' . \Illuminate\Support\Str::random(10);
         $payload = [
             'object' => 'whatsapp_business_account',
             'entry' => [
@@ -48,7 +49,7 @@ class MetaWebhookTest extends TestCase
                                 'messages' => [
                                     [
                                         'from' => '15551234567',
-                                        'id' => 'wamid.HBgLMTU1NTEyMzQ1NjcVAgASGBQzQT',
+                                        'id' => $msgId,
                                         'timestamp' => '1710000000',
                                         'text' => [
                                             'body' => 'Hello, I need assistance with my booking',

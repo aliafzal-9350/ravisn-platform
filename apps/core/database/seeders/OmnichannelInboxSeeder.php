@@ -123,7 +123,7 @@ class OmnichannelInboxSeeder extends Seeder
                 'detected_intent' => 'demo_confirmed',
                 'latency_ms' => 710,
                 'confidence_score' => 0.9920,
-                'status' => 'delivered',
+                'status' => 'read',
                 'created_at' => now()->subMinutes(19),
             ],
             [
@@ -133,6 +133,57 @@ class OmnichannelInboxSeeder extends Seeder
                 'status' => 'read',
                 'created_at' => now()->subMinutes(12),
             ],
+            [
+                'direction' => 'inbound',
+                'message_type' => 'audio',
+                'content' => 'Hello team, we are facing an emergency heating outage at our facility on 5th Avenue. Could someone dispatch a field technician right away?',
+                'media_url' => 'https://actions.google.com/sounds/v1/alarms/beep_short.ogg',
+                'media_mime_type' => 'audio/ogg',
+                'raw_payload' => [
+                    'transcript' => 'Hello team, we are facing an emergency heating outage at our facility on 5th Avenue. Could someone dispatch a field technician right away?',
+                    'asr_engine' => 'Groq Whisper large-v3',
+                    'confidence' => 0.985,
+                ],
+                'is_ai_generated' => false,
+                'status' => 'read',
+                'created_at' => now()->subMinutes(9),
+            ],
+            [
+                'direction' => 'inbound',
+                'message_type' => 'image',
+                'content' => 'Here is a photo of our boiler pressure gauge reading 0.2 bar.',
+                'media_url' => 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800&q=80',
+                'media_mime_type' => 'image/jpeg',
+                'is_ai_generated' => false,
+                'status' => 'read',
+                'created_at' => now()->subMinutes(7),
+            ],
+            [
+                'direction' => 'outbound',
+                'message_type' => 'document',
+                'content' => 'Commercial HVAC Emergency Service Protocol & SLA.pdf',
+                'media_url' => 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+                'media_mime_type' => 'application/pdf',
+                'is_ai_generated' => false,
+                'status' => 'delivered',
+                'created_at' => now()->subMinutes(5),
+            ],
+            [
+                'direction' => 'outbound',
+                'message_type' => 'note',
+                'content' => 'Client verified under Tier 2 Enterprise SLA. Senior technician #4 (David) dispatched with high-pressure booster kit to 5th Ave facility.',
+                'is_ai_generated' => false,
+                'status' => 'delivered',
+                'created_at' => now()->subMinutes(3),
+            ],
+            [
+                'direction' => 'outbound',
+                'message_type' => 'text',
+                'content' => 'Technician David is en route to your facility with ETA 15 minutes. We have received your pressure gauge photo and prepared the replacement pressure regulator.',
+                'is_ai_generated' => false,
+                'status' => 'sent',
+                'created_at' => now()->subMinutes(1),
+            ],
         ];
 
         foreach ($messages as $msg) {
@@ -140,7 +191,7 @@ class OmnichannelInboxSeeder extends Seeder
                 'thread_id' => $thread->id,
                 'contact_id' => $contact->id,
                 'channel_type' => 'whatsapp',
-                'message_type' => 'text',
+                'message_type' => $msg['message_type'] ?? 'text',
                 'updated_at' => $msg['created_at'],
             ]));
         }

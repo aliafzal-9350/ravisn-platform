@@ -18,3 +18,5 @@ class AgentState(TypedDict):
     final_response: str
     decision: str  # 'reply' | 'handoff' | 'ignore'
     telemetry: Dict[str, Any]
+    # Per-tenant AI behaviour set on the Prompt Tuning page (may be empty).
+    ai_config: Optional[Dict[str, Any]]

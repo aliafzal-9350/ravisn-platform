@@ -1,6 +1,6 @@
 import json
 import logging
-from sqlalchemy import update
+from sqlalchemy import select, update
 from redis.asyncio import Redis
 from src.graph.state import AgentState
 from src.config import settings
@@ -22,9 +22,25 @@ async def human_handoff_node(state: AgentState) -> AgentState:
     )
     state["telemetry"]["human_handoff"] = True
 
-    # 1. Update Database Thread Status to human_takeover & bot_active=False
+    # 1. Update Database Thread Status to human_takeover & bot_active=False.
+    # Skip the write/publish if the thread was already escalated (e.g. by
+    # apps/core's synchronous keyword pre-filter in AiIntelligenceEngine,
+    # which normally runs before this queue is ever reached) so a
+    # slower-arriving duplicate detection here doesn't double-publish the
+    # same escalation event.
     try:
         async with async_session_factory() as session:
+            already_escalated = await session.scalar(
+                select(Thread.id).where(
+                    Thread.id == thread_id,
+                    Thread.bot_active.is_(False),
+                    Thread.status == "human_takeover",
+                )
+            )
+            if already_escalated:
+                logger.info(f"[HumanHandoffNode] Thread {thread_id} already escalated, skipping duplicate write/publish.")
+                return state
+
             stmt = (
                 update(Thread)
                 .where(Thread.id == thread_id)

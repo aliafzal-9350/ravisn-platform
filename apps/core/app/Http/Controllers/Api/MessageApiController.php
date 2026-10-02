@@ -38,6 +38,23 @@ class MessageApiController extends Controller
             $to = '+'.preg_replace('/[^0-9]/', '', $to);
         }
 
+        // Meta 24-Hour Window Enforcement (Error 131047)
+        $contact = \App\Models\Contact::where('tenant_id', $tenant->id)
+            ->where(function ($q) use ($to) {
+                $q->where('phone', $to)->orWhere('phone_number', $to);
+            })
+            ->first();
+
+        $lastInboundAt = $contact?->last_inbound_at;
+        $hoursDiff = $lastInboundAt ? abs(\Carbon\Carbon::now()->diffInHours($lastInboundAt)) : 999;
+
+        if (! $lastInboundAt || $hoursDiff >= 24) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'body' => ['The 24-hour Meta messaging window has expired (Error 131047). You must submit a registered Meta Template ID to initiate contact.'],
+                'template_id' => ['A registered Meta Template ID is required when outside the 24-hour window.'],
+            ]);
+        }
+
         if ($account->access_token) {
             $whatsAppApi->withToken($account->access_token);
         }

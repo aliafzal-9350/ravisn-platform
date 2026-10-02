@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -14,6 +15,7 @@ class ChannelIdentity extends Model
     protected $table = 'channel_identities';
 
     protected $fillable = [
+        'tenant_id',
         'channel_type',
         'account_name',
         'external_id',
@@ -35,5 +37,13 @@ class ChannelIdentity extends Model
     public function threads(): HasMany
     {
         return $this->hasMany(Thread::class, 'channel_identity_id');
+    }
+
+    /**
+     * Restrict channels to those owned by the given tenant.
+     */
+    public function scopeForTenant(Builder $query, int|string|null $tenantId): Builder
+    {
+        return $query->where('tenant_id', (string) $tenantId);
     }
 }

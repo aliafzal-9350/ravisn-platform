@@ -1,13 +1,51 @@
 import * as React from 'react';
-import { Head, usePage } from '@inertiajs/react';
+import { Head, router, usePage } from '@inertiajs/react';
+import { toast } from 'sonner';
 import { AppShell } from '@/components/app-shell';
 import { ClientSidebar } from '@/components/client-sidebar';
-import { subscribeToThreadUpdates } from '@/echo';
+import { jsonHeaders } from '@/lib/csrf';
+import {
+    subscribeToThreadUpdates,
+    subscribeToTenantInbox,
+    playNotificationChime,
+    triggerDesktopNotification,
+    requestNotificationPermission,
+    type RealtimeMessage,
+    type RealtimeStatusUpdate,
+} from '@/echo';
 import type { ContactDetails, ThreadItem } from './Components/ConversationList';
 import { ConversationList } from './Components/ConversationList';
 import type { ThreadMessage } from './Components/MessageThread';
 import { MessageThread } from './Components/MessageThread';
 import { CustomerDetailsPanel } from './Components/CustomerDetailsPanel';
+
+/** Maps a realtime broadcast payload to the shape the thread view renders. */
+function toThreadMessage(msg: RealtimeMessage): ThreadMessage {
+    return {
+        id: msg.id,
+        thread_id: msg.thread_id,
+        direction: msg.direction,
+        message_type: msg.message_type || 'text',
+        content: msg.content,
+        media_url: msg.media_url,
+        media_mime_type: msg.media_mime_type,
+        whisper_transcript: msg.whisper_transcript,
+        status: msg.status || 'delivered',
+        is_ai_generated: msg.is_ai_generated,
+        ai_model: msg.ai_model,
+        detected_intent: msg.detected_intent,
+        latency_ms: msg.latency_ms,
+        confidence_score: msg.confidence_score,
+        telemetry: msg.telemetry,
+        rag_chunk: msg.rag_chunk,
+        created_at: msg.created_at,
+        formatted_time: new Date(msg.created_at).toLocaleTimeString([], {
+            hour: 'numeric',
+            minute: '2-digit',
+        }),
+        date_group: 'TODAY',
+    };
+}
 
 interface InboxProps {
     threads: ThreadItem[];
@@ -18,6 +56,7 @@ interface InboxProps {
         messages: ThreadMessage[];
     } | null;
     openCount?: number;
+    templates?: any[];
 }
 
 export default function Inbox({
@@ -25,6 +64,7 @@ export default function Inbox({
     initialThreadId = null,
     initialThread = null,
     openCount = 0,
+    templates = [],
 }: InboxProps) {
     const pageProps = usePage().props as any;
     const currentUserName = pageProps?.auth?.user?.name || 'Staff Member';
@@ -33,6 +73,27 @@ export default function Inbox({
     const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(
         initialThreadId || (initialThreads[0]?.id ?? null)
     );
+    const [templateList, setTemplateList] = React.useState<any[]>(templates);
+
+    // Fetch approved templates if not supplied by backend
+    React.useEffect(() => {
+        if (templates && templates.length > 0) {
+            setTemplateList(templates);
+            return;
+        }
+        fetch('/dashboard/templates?json=1', {
+            headers: { credentials: 'same-origin', Accept: 'application/json' },
+        })
+            .then((r) => r.json())
+            .then((data) => {
+                if (data?.templates && Array.isArray(data.templates)) {
+                    setTemplateList(data.templates);
+                } else if (Array.isArray(data)) {
+                    setTemplateList(data);
+                }
+            })
+            .catch(() => {});
+    }, [templates]);
     const [messages, setMessages] = React.useState<ThreadMessage[]>(
         initialThread?.messages || []
     );
@@ -103,48 +164,155 @@ export default function Inbox({
         }
     }, [selectedThreadId, fetchThreadData]);
 
-    // Subscribe to real-time Reverb WebSocket updates for active thread
+    // Request desktop notification permission on first user interaction
     React.useEffect(() => {
-        if (!selectedThreadId) return;
+        const handleUserGesture = () => {
+            requestNotificationPermission();
+            window.removeEventListener('click', handleUserGesture);
+        };
+        window.addEventListener('click', handleUserGesture);
+        return () => window.removeEventListener('click', handleUserGesture);
+    }, []);
 
-        const unsubscribe = subscribeToThreadUpdates(
-            selectedThreadId,
-            (newMsg) => {
-                setMessages((prev) => {
-                    if (prev.some((m) => m.id === newMsg.id)) return prev;
-                    const createdDate = new Date(newMsg.created_at);
-                    return [
-                        ...prev,
-                        {
-                            id: newMsg.id,
-                            thread_id: newMsg.thread_id,
-                            direction: newMsg.direction,
-                            message_type: 'text',
-                            content: newMsg.content,
-                            status: newMsg.status || 'delivered',
-                            is_ai_generated: newMsg.is_ai_generated,
-                            created_at: newMsg.created_at,
-                            formatted_time: createdDate.toLocaleTimeString([], {
-                                hour: 'numeric',
-                                minute: '2-digit',
-                            }),
-                            date_group: 'TODAY',
-                        },
-                    ];
-                });
+    // Latest state for the long-lived realtime handlers below, so the channel
+    // subscriptions are not torn down and re-joined on every incoming message.
+    const selectedThreadIdRef = React.useRef(selectedThreadId);
+    const threadListRef = React.useRef(threadList);
+    const refreshTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-                // Update last message in thread list
+    React.useEffect(() => {
+        selectedThreadIdRef.current = selectedThreadId;
+    }, [selectedThreadId]);
+
+    React.useEffect(() => {
+        threadListRef.current = threadList;
+    }, [threadList]);
+
+    // A conversation we have not loaded yet (a brand-new customer) is picked up
+    // with a debounced partial reload of the thread list.
+    const scheduleThreadListRefresh = React.useCallback(() => {
+        if (refreshTimerRef.current) {
+            return;
+        }
+
+        refreshTimerRef.current = setTimeout(() => {
+            refreshTimerRef.current = null;
+            router.reload({ only: ['threads', 'openCount'] });
+        }, 600);
+    }, []);
+
+    React.useEffect(() => {
+        return () => {
+            if (refreshTimerRef.current) {
+                clearTimeout(refreshTimerRef.current);
+            }
+        };
+    }, []);
+
+    // 1. Tenant-wide inbox channel (private-tenant.{id}.inbox): alerts, unread
+    //    counts, previews and escalation badges for every conversation.
+    const tenantId = pageProps?.auth?.user?.tenant_id;
+
+    React.useEffect(() => {
+        if (!tenantId) {
+            return;
+        }
+
+        const unsubscribe = subscribeToTenantInbox(
+            String(tenantId),
+            (newMsg: RealtimeMessage) => {
+                const activeId = selectedThreadIdRef.current;
+                const tabHidden = typeof document !== 'undefined' && document.hidden;
+
+                if (newMsg.direction === 'inbound') {
+                    // Stay quiet only while an agent is looking at this very conversation.
+                    if (tabHidden || newMsg.thread_id !== activeId) {
+                        playNotificationChime();
+                    }
+
+                    if (tabHidden) {
+                        const contactName =
+                            threadListRef.current.find((t) => t.id === newMsg.thread_id)?.contact?.name || 'Customer';
+                        triggerDesktopNotification(
+                            `New message from ${contactName}`,
+                            newMsg.content || 'Sent a media attachment',
+                            () => setSelectedThreadId(newMsg.thread_id)
+                        );
+                    }
+                }
+
+                if (!threadListRef.current.some((t) => t.id === newMsg.thread_id)) {
+                    scheduleThreadListRefresh();
+
+                    return;
+                }
+
                 setThreadList((prev) =>
                     prev.map((t) =>
-                        t.id === selectedThreadId
+                        t.id === newMsg.thread_id
                             ? {
                                   ...t,
                                   last_message_at: newMsg.created_at,
-                                  last_message_preview: newMsg.content,
+                                  last_message_preview:
+                                      newMsg.content || (newMsg.message_type ? `[${newMsg.message_type}]` : 'New message'),
+                                  unread_count:
+                                      newMsg.thread_id !== selectedThreadIdRef.current && newMsg.direction === 'inbound'
+                                          ? (t.unread_count || 0) + 1
+                                          : t.unread_count,
                               }
                             : t
                     )
                 );
+            },
+            (threadUpdate) => {
+                if (threadUpdate.bot_active === false || threadUpdate.status === 'human_takeover') {
+                    playNotificationChime();
+                    toast.error('Human escalation: AI auto-replies are paused for a conversation that needs an agent.', {
+                        duration: 7000,
+                    });
+                }
+
+                if (!threadListRef.current.some((t) => t.id === threadUpdate.id)) {
+                    scheduleThreadListRefresh();
+
+                    return;
+                }
+
+                setThreadList((prev) =>
+                    prev.map((t) =>
+                        t.id === threadUpdate.id
+                            ? {
+                                  ...t,
+                                  bot_active: threadUpdate.bot_active,
+                                  status: (threadUpdate.status ||
+                                      (threadUpdate.bot_active === false ? 'human_takeover' : t.status)) as ThreadItem['status'],
+                                  last_message_at: threadUpdate.last_message_at || t.last_message_at,
+                              }
+                            : t
+                    )
+                );
+            }
+        );
+
+        return () => unsubscribe();
+    }, [tenantId, scheduleThreadListRefresh]);
+
+    // 2. Active thread channel (chat.thread.{id}): appends messages and live status ticks.
+    React.useEffect(() => {
+        if (!selectedThreadId) {
+            return;
+        }
+
+        const unsubscribe = subscribeToThreadUpdates(
+            selectedThreadId,
+            (newMsg: RealtimeMessage) => {
+                setMessages((prev) => {
+                    if (prev.some((m) => m.id === newMsg.id)) {
+                        return prev;
+                    }
+
+                    return [...prev, toThreadMessage(newMsg)];
+                });
             },
             (threadUpdate) => {
                 setThreadList((prev) =>
@@ -158,64 +326,63 @@ export default function Inbox({
                             : t
                     )
                 );
+            },
+            (statusUpdate: RealtimeStatusUpdate) => {
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.id === statusUpdate.message_id ? { ...m, status: statusUpdate.status } : m
+                    )
+                );
             }
         );
 
         return () => unsubscribe();
     }, [selectedThreadId]);
 
-    // Send Outbound Message handler
+    // Send Outbound Message / Internal Staff Note handler
     const handleSendMessage = async (content: string, isInternalNote: boolean): Promise<boolean> => {
         if (!selectedThreadId) return false;
 
-        if (isInternalNote) {
-            // Update internal notes on contact
-            if (activeContact?.id) {
-                try {
-                    const currentNotes = activeContact.internal_notes || '';
-                    const updatedNotes = currentNotes
-                        ? `${currentNotes}\n• ${content}`
-                        : `• ${content}`;
-
-                    const res = await fetch(`/api/v1/contacts/${activeContact.id}`, {
-                        method: 'PUT',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Accept: 'application/json',
-                        },
-                        body: JSON.stringify({ internal_notes: updatedNotes }),
-                    });
-
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data.contact) {
-                            handleContactUpdated(data.contact);
-                        }
-                        return true;
-                    }
-                } catch {
-                    return false;
-                }
-            }
-            return false;
-        }
-
-        // Outbound customer message to /api/v1/inbox/threads/{id}/messages
         try {
             const res = await fetch(`/api/v1/inbox/threads/${selectedThreadId}/messages`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Accept: 'application/json',
-                },
-                body: JSON.stringify({ content }),
+                headers: jsonHeaders(),
+                body: JSON.stringify({
+                    content,
+                    type: isInternalNote ? 'note' : 'text',
+                    message_type: isInternalNote ? 'note' : 'text',
+                    is_note: isInternalNote,
+                }),
             });
 
             if (res.ok) {
                 const data = await res.json();
                 if (data.message) {
-                    setMessages((prev) => [...prev, data.message]);
+                    setMessages((prev) => {
+                        if (prev.some((m) => m.id === data.message.id)) return prev;
+                        return [...prev, data.message];
+                    });
                 }
+
+                // If note, also optionally update contact's internal notes CRM field
+                if (isInternalNote && activeContact?.id) {
+                    const currentNotes = activeContact.internal_notes || '';
+                    const updatedNotes = currentNotes
+                        ? `${currentNotes}\n• ${content}`
+                        : `• ${content}`;
+
+                    fetch(`/api/v1/contacts/${activeContact.id}`, {
+                        method: 'PUT',
+                        headers: jsonHeaders(),
+                        body: JSON.stringify({ internal_notes: updatedNotes }),
+                    })
+                        .then((r) => r.json())
+                        .then((cData) => {
+                            if (cData.contact) handleContactUpdated(cData.contact);
+                        })
+                        .catch(() => {});
+                }
+
                 // Update thread list preview
                 setThreadList((prev) =>
                     prev.map((t) =>
@@ -223,7 +390,7 @@ export default function Inbox({
                             ? {
                                   ...t,
                                   last_message_at: new Date().toISOString(),
-                                  last_message_preview: content,
+                                  last_message_preview: isInternalNote ? `[Note] ${content}` : content,
                               }
                             : t
                     )
@@ -232,6 +399,40 @@ export default function Inbox({
             }
         } catch (err) {
             console.error('Failed to send message:', err);
+        }
+        return false;
+    };
+
+    // Send Approved Meta Template handler
+    const handleSendTemplate = async (templateId: string, templateName: string, variables?: Record<string, string>) => {
+        if (!selectedThreadId) return false;
+        try {
+            const res = await fetch(`/api/v1/inbox/threads/${selectedThreadId}/messages`, {
+                method: 'POST',
+                headers: jsonHeaders(),
+                body: JSON.stringify({
+                    template_id: templateId,
+                    template_name: templateName,
+                    variables: variables || [],
+                }),
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data.message) {
+                    setMessages((prev) => {
+                        if (prev.some((m) => m.id === data.message.id)) return prev;
+                        return [...prev, data.message];
+                    });
+                }
+                fetchThreadData(selectedThreadId);
+                return true;
+            } else {
+                const errData = await res.json().catch(() => ({}));
+                console.error('Template send failed:', errData);
+            }
+        } catch (err) {
+            console.error('Failed to send template:', err);
         }
         return false;
     };
@@ -251,6 +452,29 @@ export default function Inbox({
                     : t
             )
         );
+    };
+
+    const handleToggleBot = async () => {
+        if (!selectedThreadId) return;
+        try {
+            const res = await fetch(`/api/v1/threads/${selectedThreadId}/toggle-bot`, {
+                method: 'POST',
+                headers: jsonHeaders(),
+                body: JSON.stringify({ bot_active: true }),
+            });
+            if (res.ok) {
+                toast.success('AI Bot resumed for this conversation.');
+                setThreadList((prev) =>
+                    prev.map((t) =>
+                        t.id === selectedThreadId
+                            ? { ...t, bot_active: true, status: 'open' }
+                            : t
+                    )
+                );
+            }
+        } catch {
+            toast.error('Failed to resume AI Bot.');
+        }
     };
 
     const calculatedOpenCount = threadList.filter(
@@ -281,6 +505,9 @@ export default function Inbox({
                         loading={loadingMessages}
                         showCustomerDetails={showCustomerDetails}
                         onToggleCustomerDetails={() => setShowCustomerDetails(!showCustomerDetails)}
+                        onToggleBot={handleToggleBot}
+                        templates={templateList}
+                        onSendTemplate={handleSendTemplate}
                     />
 
                     {/* Column 3: Customer Details & Notes CRM Panel (Collapsible 320px-350px Width) */}

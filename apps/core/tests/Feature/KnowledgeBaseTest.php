@@ -3,6 +3,7 @@
 use App\Models\KnowledgeBase;
 use App\Models\KnowledgeChunk;
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
 
 test('authenticated user can view knowledge base page', function () {
@@ -19,6 +20,10 @@ test('authenticated user can view knowledge base page', function () {
 });
 
 test('authenticated user can store and retrieve a qa knowledge entry', function () {
+    Http::fake([
+        '*/api/v1/knowledge/embed' => Http::response(['embedding' => array_fill(0, 1536, 0.01)], 200),
+    ]);
+
     $user = User::first() ?? User::factory()->create();
 
     $response = $this->actingAs($user)
@@ -42,6 +47,10 @@ test('authenticated user can store and retrieve a qa knowledge entry', function 
 });
 
 test('authenticated user can update a qa knowledge entry', function () {
+    Http::fake([
+        '*/api/v1/knowledge/embed' => Http::response(['embedding' => array_fill(0, 1536, 0.01)], 200),
+    ]);
+
     $user = User::first() ?? User::factory()->create();
     $kb = KnowledgeBase::firstOrCreate(
         ['name' => 'RAVISN Enterprise Knowledge Base'],

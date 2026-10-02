@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Tenant;
+use App\Models\User;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -30,13 +31,11 @@ class EnsureUserIsClient
             );
 
             $user->forceFill([
-                'role' => 'client',
+                'role' => User::ROLE_ADMIN,
                 'tenant_id' => $workspace->id,
             ])->save();
 
             $user->setRelation('tenant', $workspace);
-        } elseif (! $user->isClient()) {
-            $user->forceFill(['role' => 'client'])->save();
         }
 
         return $next($request);

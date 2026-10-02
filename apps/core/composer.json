@@ -21,8 +21,10 @@
         "laravel/chisel": "^0.1.0",
         "laravel/fortify": "^1.37.2",
         "laravel/framework": "^13.7",
+        "laravel/reverb": "^1.11",
         "laravel/tinker": "^3.0",
-        "laravel/wayfinder": "^0.1.14"
+        "laravel/wayfinder": "^0.1.14",
+        "smalot/pdfparser": "^2.12"
     },
     "require-dev": {
         "fakerphp/faker": "^1.24",
@@ -70,7 +72,7 @@
         ],
         "dev": [
             "Composer\\Config::disableProcessTimeout",
-            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve --host=localhost\" \"php artisan queue:listen --tries=1 --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite --kill-others"
+            "npx concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74,#a3e635,#fcd34d\" \"php artisan serve --host=localhost\" \"php artisan queue:listen --tries=1 --timeout=0\" \"php artisan pail --timeout=0\" \"npm run dev\" \"php artisan reverb:start --debug\" \"php artisan automation:consume-triggers\" --names=server,queue,logs,vite,reverb,automation --kill-others"
         ],
         "lint": [
             "pint --parallel"

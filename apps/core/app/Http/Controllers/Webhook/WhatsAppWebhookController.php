@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Webhook;
 
 use App\Http\Controllers\Controller;
+use App\Services\Meta\WebhookEventDeduplicator;
 use App\Services\WhatsApp\WebhookHandler;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,8 +41,19 @@ class WhatsAppWebhookController extends Controller
             return response()->json(['error' => 'Invalid signature'], 403);
         }
 
-        \Illuminate\Support\Facades\Log::info('WhatsApp Incoming Webhook:', $request->all());
-        $handler->handle($request->all());
+        $payload = $request->all();
+        \Illuminate\Support\Facades\Log::info('WhatsApp Incoming Webhook:', $payload);
+
+        // Split the delivery into single events and drop Meta retries atomically.
+        $events = app(WebhookEventDeduplicator::class)->newEvents($payload);
+
+        if (empty($events)) {
+            return response()->json(['status' => 'ok', 'duplicate' => true], 200);
+        }
+
+        foreach ($events as $event) {
+            $handler->handle($event['payload']);
+        }
 
         return response()->json(['status' => 'ok']);
     }

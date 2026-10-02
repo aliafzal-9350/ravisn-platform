@@ -3,7 +3,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from sqlalchemy import update
+from sqlalchemy import select, update
 from redis.asyncio import Redis
 from src.config import settings
 from src.graph.graph import compiled_agent_graph
@@ -13,6 +13,23 @@ from src.db.models import Message, Thread
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("redis_consumer")
+
+
+async def _bot_is_active(thread_id) -> bool:
+    """Whether autonomous replies are still allowed for this thread right now.
+
+    A human agent can take over while a job is already queued or the graph is
+    running; the enqueue-time check alone cannot see that.
+    """
+    try:
+        async with async_session_factory() as session:
+            active = await session.scalar(
+                select(Thread.bot_active).where(Thread.id == uuid.UUID(str(thread_id)))
+            )
+            return bool(active) if active is not None else True
+    except Exception as e:
+        logger.warning(f"[RedisConsumer] bot_active re-check failed, assuming active: {e}")
+        return True
 
 
 async def run_inbound_worker():
@@ -60,7 +77,8 @@ async def run_inbound_worker():
                 "intent": "",
                 "final_response": "",
                 "decision": "reply",
-                "telemetry": {}
+                "telemetry": {},
+                "ai_config": job_data.get("ai_config") or {},
             }
 
             final_state = await compiled_agent_graph.ainvoke(initial_state)
@@ -68,6 +86,12 @@ async def run_inbound_worker():
             final_response = final_state.get("final_response")
             decision = final_state.get("decision", "reply")
             telemetry = final_state.get("telemetry", {})
+
+            # 1b. A human may have taken over while the graph was running — never
+            # send an autonomous reply into a conversation an agent now owns.
+            if decision == "reply" and not await _bot_is_active(thread_id):
+                logger.info(f"⏸️  Skipping AI reply for Thread {thread_id}: human takeover is active")
+                continue
 
             # 2. Dispatch Reply via Meta Graph API
             external_msg_id = None
@@ -129,13 +153,19 @@ async def run_inbound_worker():
                             "thread_id": str(thread_id),
                             "contact_id": str(contact_id),
                             "direction": "outbound",
+                            "channel_type": channel,
+                            "message_type": "text",
                             "content": final_response,
+                            "status": "sent" if external_msg_id else "queued",
                             "is_ai_generated": True,
                             "ai_model": telemetry.get("model", settings.OPENAI_CHAT_MODEL),
                             "detected_intent": final_state.get("intent"),
                             "latency_ms": telemetry.get("latency_ms"),
                             "prompt_tokens": telemetry.get("prompt_tokens"),
                             "completion_tokens": telemetry.get("completion_tokens"),
+                            "confidence_score": telemetry.get("confidence_score", 1.0),
+                            "telemetry": telemetry,
+                            "rag_chunk": telemetry.get("cited_chunk"),
                             "created_at": datetime.utcnow().isoformat(),
                         }
                     })

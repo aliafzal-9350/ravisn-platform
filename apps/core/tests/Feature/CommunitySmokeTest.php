@@ -41,7 +41,7 @@ test('community provisions a workspace for legacy users without one', function (
 
     $user->refresh();
 
-    expect($user->role)->toBe('client')
+    expect($user->role)->toBe('admin')
         ->and($user->tenant_id)->not->toBeNull()
         ->and($user->tenant)->not->toBeNull()
         ->and($user->tenant->name)->toBe("{$user->name} Workspace");

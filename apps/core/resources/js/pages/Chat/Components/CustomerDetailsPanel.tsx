@@ -1,3 +1,4 @@
+import { jsonHeaders } from '@/lib/csrf';
 import * as React from 'react';
 import { toast } from 'sonner';
 import { User, X } from 'lucide-react';
@@ -59,10 +60,7 @@ export function CustomerDetailsPanel({
         try {
             const res = await fetch(`/api/v1/contacts/${contact.id}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Accept: 'application/json',
-                },
+                headers: jsonHeaders(),
                 body: JSON.stringify({
                     name,
                     phone_number: phoneNumber,

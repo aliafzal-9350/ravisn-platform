@@ -15,7 +15,10 @@ class ContactController extends Controller
      */
     public function update(Request $request, string $id): JsonResponse
     {
-        $contact = Contact::findOrFail($id);
+        $tenantId = $request->user()?->tenant_id;
+        abort_if($tenantId === null, 403, 'Your account is not attached to a workspace.');
+
+        $contact = Contact::where('tenant_id', (string) $tenantId)->findOrFail($id);
 
         $validated = $request->validate([
             'name' => 'nullable|string|max:255',
