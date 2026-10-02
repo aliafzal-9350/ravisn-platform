@@ -73,10 +73,11 @@ class ChannelController extends Controller
             'display_phone_number' => $isWhatsappActive ? ($whatsapp->account_name ?? ($whatsapp->settings['phone_number'] ?? '')) : '',
             'verified_name' => $isWhatsappActive ? ($whatsapp->settings['verified_name'] ?? ($whatsapp->settings['business_name'] ?? '')) : '',
             'display_name' => $isWhatsappActive ? ($whatsapp->settings['display_name'] ?? ($whatsapp->settings['verified_name'] ?? '')) : '',
-            'quality_rating' => $isWhatsappActive ? ($whatsapp->settings['quality_rating'] ?? 'GREEN (High Quality)') : '',
-            'messaging_limit' => $isWhatsappActive ? ($whatsapp->settings['messaging_limit'] ?? '1k / 24 Hours') : '',
-            'message_window' => $isWhatsappActive ? ($whatsapp->settings['message_window'] ?? 'Active (24h Standard)') : '',
-            'status' => $isWhatsappActive ? ($whatsapp->settings['status'] ?? 'Active & Verified') : 'Disconnected',
+            // Only values Meta reported; unknown stays empty instead of a reassuring default.
+            'quality_rating' => $isWhatsappActive ? ($whatsapp->settings['quality_rating'] ?? '') : '',
+            'messaging_limit' => $isWhatsappActive ? ($whatsapp->settings['messaging_limit'] ?? '') : '',
+            'message_window' => $isWhatsappActive ? ($whatsapp->settings['message_window'] ?? '') : '',
+            'status' => $isWhatsappActive ? ($whatsapp->settings['status'] ?? 'Connected') : 'Disconnected',
             'meta_api_version' => 'v21.0',
         ];
 
@@ -86,11 +87,11 @@ class ChannelController extends Controller
             'ig_scoped_id' => $isInstagramActive ? ($instagram->external_id ?? ($instagram->settings['ig_scoped_id'] ?? '')) : '',
             'username' => $isInstagramActive ? ($instagram->account_name ?? ($instagram->settings['username'] ?? '')) : '',
             'profile_name' => $isInstagramActive ? ($instagram->settings['profile_name'] ?? '') : '',
-            'account_type' => $isInstagramActive ? ($instagram->settings['account_type'] ?? 'Professional Business') : '',
+            'account_type' => $isInstagramActive ? ($instagram->settings['account_type'] ?? '') : '',
             'meta_portfolio' => $isInstagramActive ? ($instagram->business_account_id ?? ($instagram->settings['meta_portfolio'] ?? '')) : '',
-            'permissions' => $isInstagramActive ? ($instagram->settings['permissions'] ?? 'Direct Messaging & Story Replies') : '',
-            'auth_state' => $isInstagramActive ? ($instagram->settings['auth_state'] ?? 'Permanent System User') : '',
-            'handover_mode' => $isInstagramActive ? ($instagram->settings['handover_mode'] ?? 'Standby Protocol Active') : '',
+            'permissions' => $isInstagramActive ? ($instagram->settings['permissions'] ?? '') : '',
+            'auth_state' => $isInstagramActive ? ($instagram->settings['auth_state'] ?? '') : '',
+            'handover_mode' => $isInstagramActive ? ($instagram->settings['handover_mode'] ?? '') : '',
             'status' => $isInstagramActive ? ($instagram->settings['status'] ?? 'Connected') : 'Disconnected',
         ];
 
@@ -100,16 +101,16 @@ class ChannelController extends Controller
             'page_id' => $isMessengerActive ? ($messenger->external_id ?? ($messenger->settings['page_id'] ?? '')) : '',
             'page_name' => $isMessengerActive ? ($messenger->account_name ?? ($messenger->settings['page_name'] ?? '')) : '',
             'linked_page' => $isMessengerActive ? ($messenger->settings['linked_page'] ?? ($messenger->account_name ? "{$messenger->account_name} Page" : '')) : '',
-            'category' => $isMessengerActive ? ($messenger->settings['category'] ?? 'Business Page') : '',
-            'subscribed_fields' => $isMessengerActive ? ($messenger->settings['subscribed_fields'] ?? 'messages, postbacks, reads') : '',
-            'messaging_state' => $isMessengerActive ? ($messenger->settings['messaging_state'] ?? 'Online / Operational') : '',
-            'response_rate' => $isMessengerActive ? ($messenger->settings['response_rate'] ?? '100% (Instant AI Active)') : '',
+            'category' => $isMessengerActive ? ($messenger->settings['category'] ?? '') : '',
+            'subscribed_fields' => $isMessengerActive ? ($messenger->settings['subscribed_fields'] ?? '') : '',
+            'messaging_state' => $isMessengerActive ? ($messenger->settings['messaging_state'] ?? '') : '',
+            'response_rate' => $isMessengerActive ? ($messenger->settings['response_rate'] ?? '') : '',
             'status' => $isMessengerActive ? ($messenger->settings['status'] ?? 'Connected') : 'Disconnected',
         ];
 
         $appUrl = config('app.url', url('/'));
         $webhookUrl = config('services.meta.webhook_url', rtrim($appUrl, '/') . '/webhook/meta');
-        $verifyToken = config('services.meta.verify_token', env('META_VERIFY_TOKEN', 'meta-verify-token-prod'));
+        $verifyToken = (string) config('services.meta.webhook_verify_token');
 
         $webhookData = [
             'ingress_url' => $webhookUrl,
@@ -117,8 +118,9 @@ class ChannelController extends Controller
             'verify_token' => $verifyToken,
             'api_version' => 'v21.0',
             'is_active' => true,
-            'sla_latency' => '16.16ms',
-            'signature_verification' => 'Active (X-Hub-Signature-256)',
+            'signature_verification' => filled(config('services.meta.app_secret'))
+                ? 'Active (X-Hub-Signature-256)'
+                : 'Not configured: set META_APP_SECRET',
         ];
 
         return Inertia::render('client/connect/index', [
@@ -226,49 +228,43 @@ class ChannelController extends Controller
             'verified_name' => ['nullable', 'string', 'max:100'],
             'waba_id' => ['required', 'string', 'max:100'],
             'phone_number_id' => ['required', 'string', 'max:100'],
-            'system_user_token' => ['nullable', 'string'],
-            'access_token' => ['nullable', 'string'],
+            'system_user_token' => ['required_without:access_token', 'nullable', 'string'],
+            'access_token' => ['required_without:system_user_token', 'nullable', 'string'],
         ]);
 
-        $token = $validated['system_user_token'] ?? ($validated['access_token'] ?? '');
-        $phoneNumber = $validated['display_phone_number'] ?? ($validated['phone_number'] ?? '');
-        $businessName = $validated['verified_name'] ?? ($validated['display_name'] ?? '');
+        $token = $validated['system_user_token'] ?? $validated['access_token'];
         $wabaId = $validated['waba_id'];
         $phoneId = $validated['phone_number_id'];
 
-        $qualityRating = 'GREEN (High Quality)';
-        $messagingLimit = '1k / 24 Hours (Tier 1)';
-
-        // Validate token against Meta Graph API if provided
-        if (!empty($token)) {
-            try {
-                $details = $this->metaClient->getPhoneNumberDetails($phoneId, $token);
-                if ($details) {
-                    if (!empty($details['display_phone_number'])) {
-                        $phoneNumber = $details['display_phone_number'];
-                    }
-                    if (!empty($details['verified_name'])) {
-                        $businessName = $details['verified_name'];
-                    }
-                    if (!empty($details['quality_rating'])) {
-                        $qualityRating = strtoupper($details['quality_rating']) . ' (High Quality)';
-                    }
-                    if (!empty($details['messaging_limit_tier'])) {
-                        $messagingLimit = $details['messaging_limit_tier'];
-                    }
-                }
-            } catch (\Throwable $e) {
-                Log::warning("[ChannelController] Manual WABA token validation warning: " . $e->getMessage());
-            }
-        }
-
-        $phoneNumber = $phoneNumber ?: 'Connected WhatsApp Number';
-        $businessName = $businessName ?: 'WhatsApp Business Account';
-
+        // Refuse another workspace's number before the token is sent anywhere.
         $tenantId = $this->tenantId($request);
         $this->assertAssetNotOwnedByAnotherTenant($phoneId, $tenantId);
 
-        $verifyToken = config('services.meta.verify_token', env('META_VERIFY_TOKEN', 'meta-verify-token-prod'));
+        // Only link a number Meta confirms this token can operate. Everything
+        // shown afterwards (name, quality, limit) comes from Meta, not defaults.
+        try {
+            $details = $this->metaClient->getPhoneNumberDetails($phoneId, $token);
+        } catch (\Throwable $e) {
+            Log::warning('[ChannelController] Manual WABA token validation failed: '.$e->getMessage());
+            $details = null;
+        }
+
+        if (empty($details)) {
+            $message = 'Meta did not accept this access token for that phone number ID. Check both values in Meta Business Manager and try again.';
+
+            if ($request->wantsJson() || $request->is('api/*')) {
+                return response()->json(['success' => false, 'message' => $message], 422);
+            }
+
+            return back()->withErrors(['system_user_token' => $message]);
+        }
+
+        $phoneNumber = $details['display_phone_number'] ?? $validated['display_phone_number'] ?? $validated['phone_number'] ?? $phoneId;
+        $businessName = $details['verified_name'] ?? $validated['verified_name'] ?? $validated['display_name'] ?? '';
+        $qualityRating = isset($details['quality_rating']) ? strtoupper($details['quality_rating']) : null;
+        $messagingLimit = $details['messaging_limit_tier'] ?? null;
+
+        $verifyToken = (string) config('services.meta.webhook_verify_token');
 
         $channel = ChannelIdentity::updateOrCreate(
             ['tenant_id' => $tenantId, 'channel_type' => 'whatsapp'],
@@ -276,7 +272,7 @@ class ChannelController extends Controller
                 'account_name' => $phoneNumber,
                 'external_id' => $phoneId,
                 'business_account_id' => $wabaId,
-                'access_token' => $token ?: 'encrypted_sys_token_' . md5($phoneId . time()),
+                'access_token' => $token,
                 'webhook_verify_token' => $verifyToken,
                 'is_active' => true,
                 'settings' => [
@@ -285,8 +281,7 @@ class ChannelController extends Controller
                     'phone_number' => $phoneNumber,
                     'quality_rating' => $qualityRating,
                     'messaging_limit' => $messagingLimit,
-                    'message_window' => 'Active (24h Standard)',
-                    'status' => 'Active & Verified',
+                    'status' => 'Connected',
                     'meta_api_version' => 'v21.0',
                     'waba_id' => $wabaId,
                     'phone_number_id' => $phoneId,
@@ -298,7 +293,7 @@ class ChannelController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'WhatsApp Business Account linked and verified successfully.',
-                'channel' => $channel,
+                'channel' => $channel->only(['id', 'channel_type', 'account_name', 'external_id', 'business_account_id', 'is_active', 'settings']),
             ]);
         }
 
@@ -326,7 +321,7 @@ class ChannelController extends Controller
         $accountName = $validated['account_name'] ?? null;
         $settings = [
             'meta_api_version' => 'v21.0',
-            'status' => $channelType === 'whatsapp' ? 'Active & Verified' : 'Connected',
+            'status' => 'Connected',
         ];
 
         // Enrich metadata dynamically
@@ -338,9 +333,8 @@ class ChannelController extends Controller
                     $settings['verified_name'] = $details['verified_name'] ?? ($accountName ?? 'WhatsApp Business');
                     $settings['display_name'] = $details['verified_name'] ?? ($accountName ?? 'WhatsApp Business');
                     $settings['phone_number'] = $details['display_phone_number'] ?? $accountName;
-                    $settings['quality_rating'] = !empty($details['quality_rating']) ? strtoupper($details['quality_rating']) . ' (High Quality)' : 'GREEN (High Quality)';
-                    $settings['messaging_limit'] = $details['messaging_limit_tier'] ?? '1k / 24 Hours';
-                    $settings['message_window'] = 'Active (24h Standard)';
+                    $settings['quality_rating'] = ! empty($details['quality_rating']) ? strtoupper($details['quality_rating']) : null;
+                    $settings['messaging_limit'] = $details['messaging_limit_tier'] ?? null;
                     $settings['waba_id'] = $businessAccountId ?: '';
                     $settings['phone_number_id'] = $externalId;
                 }
@@ -402,7 +396,7 @@ class ChannelController extends Controller
             $settings['handover_mode'] = 'Standby Protocol Active';
         }
 
-        $verifyToken = config('services.meta.verify_token', env('META_VERIFY_TOKEN', 'meta-verify-token-prod'));
+        $verifyToken = (string) config('services.meta.webhook_verify_token');
 
         $tenantId = $this->tenantId($request);
         $this->assertAssetNotOwnedByAnotherTenant($externalId, $tenantId);

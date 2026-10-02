@@ -28,8 +28,9 @@ interface WhatsappAccount {
     phone_number_id: string;
     waba_id: string;
     app_id: string | null;
-    app_secret: string | null;
-    access_token: string | null;
+    // Secrets never leave the server; the page only learns whether one is set.
+    has_app_secret: boolean;
+    has_access_token: boolean;
     verified_at: string | null;
     created_at: string;
 }

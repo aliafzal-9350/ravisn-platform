@@ -14,7 +14,7 @@ class RedisEventDispatcher
     {
         try {
             $json = json_encode($payload, JSON_THROW_ON_ERROR);
-            Redis::rpush($queueKey, $json);
+            Redis::connection('bridge')->rpush($queueKey, $json);
         } catch (\Throwable $e) {
             Log::error('[RedisEventDispatcher] Failed to push AI job to Redis', [
                 'error' => $e->getMessage(),
@@ -30,7 +30,7 @@ class RedisEventDispatcher
     {
         try {
             $json = json_encode($data, JSON_THROW_ON_ERROR);
-            Redis::publish($channel, $json);
+            Redis::connection('bridge')->publish($channel, $json);
         } catch (\Throwable $e) {
             Log::error('[RedisEventDispatcher] Failed to publish CRM update', [
                 'error' => $e->getMessage(),

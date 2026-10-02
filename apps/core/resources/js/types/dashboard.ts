@@ -4,7 +4,7 @@ export interface ChannelOverview {
     display_number?: string;
     username?: string;
     page_name?: string;
-    quality_rating?: string;
+    quality_rating?: string | null;
     tier_limit?: number;
     daily_sent?: number;
     consumption_pct?: number;
@@ -18,23 +18,26 @@ export interface DashboardProps {
         campaigns_count: number;
     };
     usage: {
-        marketing: { count: number; cost: string };
-        auth: { count: number; cost: string };
-        utility: { count: number; cost: string };
-        service: { count: number; cost: string };
+        /** False when messages do not record their Meta pricing category. */
+        tracked?: boolean;
+        marketing: { count: number | null; cost: string | null };
+        auth: { count: number | null; cost: string | null };
+        utility: { count: number | null; cost: string | null };
+        service: { count: number | null; cost: string | null };
         total_sent: number;
-        total_cost_usd: string;
+        total_cost_usd: string | null;
     };
     telemetry: {
         total_contacts?: number;
         open_threads?: number;
         total_sent: number;
         total_delivered: number;
-        delivery_rate: number;
+        /** null until something has been sent. */
+        delivery_rate: number | null;
         total_inbound: number;
-        avg_latency_ms: number;
+        avg_latency_ms: number | null;
         total_failed: number;
-        resolution_rate: number;
+        resolution_rate: number | null;
         qualified_leads: number;
         demos_booked: number;
     };

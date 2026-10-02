@@ -119,4 +119,33 @@ class Tenant extends Model
     {
         return $this->status === 'active';
     }
+
+    /**
+     * Whether the AI may answer customers at all. "Pure manual" (set on the
+     * Automations page) is the workspace-wide off switch: humans reply to
+     * everything.
+     */
+    public function aiRepliesEnabled(): bool
+    {
+        return $this->ai_strategy !== 'pure_manual';
+    }
+
+    /**
+     * The Prompt Tuning settings sent with every AI task, so the agent answers
+     * in this tenant's own voice.
+     *
+     * @return array<string, mixed>
+     */
+    public function aiConfig(): array
+    {
+        $settings = $this->settings ?? [];
+
+        return array_filter([
+            'system_prompt' => $settings['system_prompt'] ?? null,
+            'ai_tone' => $settings['ai_tone'] ?? null,
+            'prohibited_topics' => $settings['prohibited_topics'] ?? null,
+            'temperature' => $settings['temperature'] ?? null,
+            'company_name' => $this->name,
+        ], fn ($value) => $value !== null && $value !== '');
+    }
 }

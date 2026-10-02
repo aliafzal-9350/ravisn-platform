@@ -1,11 +1,11 @@
 import io
 import zipfile
-import xml.etree.ElementTree as ET
+from defusedxml.ElementTree import fromstring as safe_fromstring
 import uuid
 import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from pydantic import BaseModel
 import pypdf
 from sqlalchemy import select
@@ -41,18 +41,14 @@ def split_text_into_chunks(text: str, chunk_size: int = 600, chunk_overlap: int 
 
 
 class KnowledgeBaseCreate(BaseModel):
+    tenant_id: str
     name: str
     description: Optional[str] = None
     embedding_model: str = "text-embedding-3-small"
 
 
-class KnowledgeChunkCreate(BaseModel):
-    knowledge_base_id: str
-    content: str
-    metadata: Optional[dict] = None
-
-
 class KnowledgeDocumentCreate(BaseModel):
+    tenant_id: str
     knowledge_base_id: Optional[str] = None
     title: Optional[str] = "Uploaded Document"
     content: str
@@ -61,32 +57,12 @@ class KnowledgeDocumentCreate(BaseModel):
     chunk_overlap: int = 80
 
 
-@router.get("/")
-async def list_knowledge_bases(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(KnowledgeBase))
-    kbs = result.scalars().all()
-    return {"knowledge_bases": kbs}
-
-
-@router.post("/")
-async def create_knowledge_base(kb_in: KnowledgeBaseCreate, db: AsyncSession = Depends(get_db)):
-    kb = KnowledgeBase(
-        name=kb_in.name,
-        description=kb_in.description,
-        embedding_model=kb_in.embedding_model,
-        dimension=1536
-    )
-    db.add(kb)
-    await db.commit()
-    await db.refresh(kb)
-    return kb
-
-
 class EmbedRequest(BaseModel):
     text: str
 
 
 class KnowledgeEntryCreate(BaseModel):
+    tenant_id: str
     knowledge_base_id: Optional[str] = None
     question: str
     answer: str
@@ -97,6 +73,81 @@ class KnowledgeEntryUpdate(BaseModel):
     question: Optional[str] = None
     answer: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+def _parse_uuid(value: str, label: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail=f"{label} not found.")
+
+
+async def _tenant_knowledge_base(db: AsyncSession, tenant_id: str, kb_id: Optional[str]) -> KnowledgeBase:
+    """The tenant's knowledge base: the one named, or its default (created on first use).
+
+    A knowledge base owned by another tenant is reported as not found.
+    """
+    if kb_id:
+        result = await db.execute(
+            select(KnowledgeBase).where(
+                KnowledgeBase.id == _parse_uuid(kb_id, "Knowledge base"),
+                KnowledgeBase.tenant_id == tenant_id,
+            )
+        )
+        kb = result.scalars().first()
+        if not kb:
+            raise HTTPException(status_code=404, detail="Knowledge base not found.")
+        return kb
+
+    result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.tenant_id == tenant_id).limit(1))
+    kb = result.scalars().first()
+    if not kb:
+        kb = KnowledgeBase(
+            tenant_id=tenant_id,
+            name="Knowledge Base",
+            description="Primary repository for RAG retrieval",
+            embedding_model="text-embedding-3-small",
+            dimension=1536
+        )
+        db.add(kb)
+        await db.commit()
+        await db.refresh(kb)
+    return kb
+
+
+async def _tenant_chunk(db: AsyncSession, tenant_id: str, chunk_id: str) -> KnowledgeChunk:
+    result = await db.execute(
+        select(KnowledgeChunk).where(
+            KnowledgeChunk.id == _parse_uuid(chunk_id, "Knowledge entry"),
+            KnowledgeChunk.tenant_id == tenant_id,
+        )
+    )
+    chunk = result.scalars().first()
+    if not chunk:
+        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+    return chunk
+
+
+@router.get("/")
+async def list_knowledge_bases(tenant_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(KnowledgeBase).where(KnowledgeBase.tenant_id == tenant_id))
+    kbs = result.scalars().all()
+    return {"knowledge_bases": kbs}
+
+
+@router.post("/")
+async def create_knowledge_base(kb_in: KnowledgeBaseCreate, db: AsyncSession = Depends(get_db)):
+    kb = KnowledgeBase(
+        tenant_id=kb_in.tenant_id,
+        name=kb_in.name,
+        description=kb_in.description,
+        embedding_model=kb_in.embedding_model,
+        dimension=1536
+    )
+    db.add(kb)
+    await db.commit()
+    await db.refresh(kb)
+    return kb
 
 
 @router.post("/embed")
@@ -117,21 +168,7 @@ async def generate_text_embedding(req: EmbedRequest):
 @router.post("/entry")
 async def create_knowledge_entry(entry_in: KnowledgeEntryCreate, db: AsyncSession = Depends(get_db)):
     """Create a Q&A knowledge entry with 1536-dimensional vector embedding."""
-    kb_id = entry_in.knowledge_base_id
-    if not kb_id:
-        result = await db.execute(select(KnowledgeBase).limit(1))
-        default_kb = result.scalars().first()
-        if not default_kb:
-            default_kb = KnowledgeBase(
-                name="RAVISN Enterprise Knowledge Base",
-                description="Primary repository for enterprise RAG retrieval",
-                embedding_model="text-embedding-3-small",
-                dimension=1536
-            )
-            db.add(default_kb)
-            await db.commit()
-            await db.refresh(default_kb)
-        kb_id = str(default_kb.id)
+    kb = await _tenant_knowledge_base(db, entry_in.tenant_id, entry_in.knowledge_base_id)
 
     formatted_content = f"Question: {entry_in.question}\n\nAnswer: {entry_in.answer}"
     try:
@@ -149,7 +186,8 @@ async def create_knowledge_entry(entry_in: KnowledgeEntryCreate, db: AsyncSessio
     }
 
     chunk = KnowledgeChunk(
-        knowledge_base_id=uuid.UUID(kb_id),
+        knowledge_base_id=kb.id,
+        tenant_id=entry_in.tenant_id,
         content=formatted_content,
         metadata_=meta,
         embedding=embedding_vector
@@ -169,12 +207,14 @@ async def create_knowledge_entry(entry_in: KnowledgeEntryCreate, db: AsyncSessio
 
 
 @router.put("/entry/{chunk_id}")
-async def update_knowledge_entry(chunk_id: str, entry_in: KnowledgeEntryUpdate, db: AsyncSession = Depends(get_db)):
+async def update_knowledge_entry(
+    chunk_id: str,
+    entry_in: KnowledgeEntryUpdate,
+    tenant_id: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
     """Update a Q&A knowledge entry and recalculate embedding."""
-    result = await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.id == uuid.UUID(chunk_id)))
-    chunk = result.scalars().first()
-    if not chunk:
-        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+    chunk = await _tenant_chunk(db, tenant_id, chunk_id)
 
     meta = dict(chunk.metadata_ or {})
     current_q = entry_in.question or meta.get("question", "")
@@ -210,12 +250,9 @@ async def update_knowledge_entry(chunk_id: str, entry_in: KnowledgeEntryUpdate, 
 
 
 @router.delete("/entry/{chunk_id}")
-async def delete_knowledge_entry(chunk_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_knowledge_entry(chunk_id: str, tenant_id: str = Query(...), db: AsyncSession = Depends(get_db)):
     """Delete a single knowledge entry chunk."""
-    result = await db.execute(select(KnowledgeChunk).where(KnowledgeChunk.id == uuid.UUID(chunk_id)))
-    chunk = result.scalars().first()
-    if not chunk:
-        raise HTTPException(status_code=404, detail="Knowledge entry not found.")
+    chunk = await _tenant_chunk(db, tenant_id, chunk_id)
 
     await db.delete(chunk)
     await db.commit()
@@ -223,10 +260,16 @@ async def delete_knowledge_entry(chunk_id: str, db: AsyncSession = Depends(get_d
 
 
 @router.delete("/all/{kb_id}")
-async def delete_all_knowledge_entries(kb_id: str, db: AsyncSession = Depends(get_db)):
-    """Delete all knowledge chunks for a knowledge base."""
+async def delete_all_knowledge_entries(kb_id: str, tenant_id: str = Query(...), db: AsyncSession = Depends(get_db)):
+    """Delete all knowledge chunks for one of the tenant's knowledge bases."""
     from sqlalchemy import delete
-    await db.execute(delete(KnowledgeChunk).where(KnowledgeChunk.knowledge_base_id == uuid.UUID(kb_id)))
+    kb = await _tenant_knowledge_base(db, tenant_id, kb_id)
+    await db.execute(
+        delete(KnowledgeChunk).where(
+            KnowledgeChunk.knowledge_base_id == kb.id,
+            KnowledgeChunk.tenant_id == tenant_id,
+        )
+    )
     await db.commit()
     return {"status": "success", "message": "All entries deleted."}
 
@@ -234,22 +277,9 @@ async def delete_all_knowledge_entries(kb_id: str, db: AsyncSession = Depends(ge
 @router.post("/document")
 @router.post("/documents")
 async def ingest_document(doc_in: KnowledgeDocumentCreate, db: AsyncSession = Depends(get_db)):
-    """Chunks, embeds, and stores a document in pgvector with HNSW indexing."""
-    kb_id = doc_in.knowledge_base_id
-    if not kb_id:
-        result = await db.execute(select(KnowledgeBase).limit(1))
-        default_kb = result.scalars().first()
-        if not default_kb:
-            default_kb = KnowledgeBase(
-                name="RAVISN Enterprise Knowledge Base",
-                description="Primary repository for enterprise RAG retrieval",
-                embedding_model="text-embedding-3-small",
-                dimension=1536
-            )
-            db.add(default_kb)
-            await db.commit()
-            await db.refresh(default_kb)
-        kb_id = str(default_kb.id)
+    """Chunks, embeds, and stores a document in the tenant's pgvector knowledge base."""
+    kb = await _tenant_knowledge_base(db, doc_in.tenant_id, doc_in.knowledge_base_id)
+    kb_id = str(kb.id)
 
     chunks = split_text_into_chunks(doc_in.content, chunk_size=doc_in.chunk_size, chunk_overlap=doc_in.chunk_overlap)
     if not chunks:
@@ -273,7 +303,8 @@ async def ingest_document(doc_in: KnowledgeDocumentCreate, db: AsyncSession = De
             "total_chunks": len(chunks)
         }
         chunk = KnowledgeChunk(
-            knowledge_base_id=uuid.UUID(kb_id),
+            knowledge_base_id=kb.id,
+            tenant_id=doc_in.tenant_id,
             content=chunk_text,
             metadata_=chunk_meta,
             embedding=embedding_vector
@@ -314,7 +345,9 @@ async def parse_document_file(file: UploadFile = File(...)):
         elif lower_name.endswith(".docx") or lower_name.endswith(".doc"):
             with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
                 xml_content = z.read("word/document.xml")
-                tree = ET.fromstring(xml_content)
+                # defusedxml refuses external entities and entity-expansion
+                # bombs regardless of the document's encoding.
+                tree = safe_fromstring(xml_content)
                 namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
                 paragraphs = []
                 for p in tree.findall(".//w:p", namespaces):

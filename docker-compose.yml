@@ -1,11 +1,71 @@
 # ==============================================================================
-# RAVISN Platform: Unified Multi-Service Local & Production Orchestration
+# RAVISN Platform: Production Service Topology
 # ==============================================================================
+# Secure by default: only the nginx gateway publishes ports. Postgres, Redis,
+# the FastAPI agent and Reverb are reachable on the internal docker network only.
+#
+#   Production:  docker compose up -d --build
+#   Local dev:   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#                (adds source bind mounts and localhost-only debug ports)
+#
+# Required in the root .env (generate with: openssl rand -hex 32):
+#   REDIS_PASSWORD, AGENT_INTERNAL_TOKEN, POSTGRES_PASSWORD
+# Use hex values: they are embedded in redis:// URLs.
 
+x-core-env: &core-env
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  CACHE_STORE: redis
+  SESSION_DRIVER: redis
+  QUEUE_CONNECTION: redis
+  APP_URL: ${APP_URL:-http://localhost}
+  AGENT_API_URL: http://agent:8000
+  AGENT_INTERNAL_TOKEN: ${AGENT_INTERNAL_TOKEN:?Set AGENT_INTERNAL_TOKEN in .env}
+
+x-agent-env: &agent-env
+  DATABASE_URL: ${DATABASE_POOLER_URL}
+  DATABASE_ASYNC_URL: ${DATABASE_ASYNC_URL}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  INTERNAL_API_TOKEN: ${AGENT_INTERNAL_TOKEN}
+  # The agent is internal-only; browsers never call it directly.
+  CORS_ORIGINS: ${CORS_ORIGINS:-}
+
+x-core-service: &core-service
+  build:
+    context: ./apps/core
+    dockerfile: Dockerfile
+  image: ravisn-platform-core:latest
+  env_file: .env
+  environment: *core-env
+  restart: always
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    core:
+      condition: service_started
+
+x-agent-service: &agent-service
+  build:
+    context: ./apps/agent
+    dockerfile: Dockerfile
+  image: ravisn-platform-agent:latest
+  env_file: .env
+  environment: *agent-env
+  restart: always
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
 
 services:
   # ----------------------------------------------------------------------------
-  # 1. Reverse Proxy Gateway (Nginx)
+  # 1. Reverse Proxy Gateway (Nginx) - the only public entrypoint
   # ----------------------------------------------------------------------------
   nginx:
     image: nginx:alpine
@@ -19,245 +79,95 @@ services:
     mem_limit: 150m
     depends_on:
       - core
-      - agent
+      - core-reverb
 
   # ----------------------------------------------------------------------------
   # 2. Laravel Core (CRM Dashboard, Inertia React, Outbound Campaigns, Auth)
   # ----------------------------------------------------------------------------
   core:
-    build:
-      context: ./apps/core
-      dockerfile: Dockerfile
-    image: ravisn-platform-core:latest
+    <<: *core-service
     container_name: ravisn-core
-    env_file: .env
-    environment:
-      - REDIS_CLIENT=phpredis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_STORE=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-      - APP_URL=${APP_URL:-http://localhost:8000}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    ports:
-      - "8000:80"
-    volumes:
-      - ./apps/core:/var/www/html
-    restart: always
     mem_limit: 800m
 
   # ----------------------------------------------------------------------------
   # 3. Laravel Queue Worker (Campaigns, Webhooks, Outbound Messages)
   # ----------------------------------------------------------------------------
   core-worker:
-    build:
-      context: ./apps/core
-      dockerfile: Dockerfile
-    image: ravisn-platform-core:latest
+    <<: *core-service
     container_name: ravisn-core-worker
     command: php artisan queue:work redis --queue=campaigns,webhooks,default --sleep=1 --tries=3 --max-time=3600
-    env_file: .env
-    environment:
-      - REDIS_CLIENT=phpredis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_STORE=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
-    volumes:
-      - ./apps/core:/var/www/html
-    restart: always
     mem_limit: 400m
 
   # ----------------------------------------------------------------------------
-  # 3a. Laravel Reverb Bridge (relays Redis Pub/Sub updates from the Python
+  # 3a. Laravel Scheduler (scheduled campaigns and other routes/console.php tasks)
+  # ----------------------------------------------------------------------------
+  core-scheduler:
+    <<: *core-service
+    container_name: ravisn-core-scheduler
+    command: php artisan schedule:work
+    mem_limit: 200m
+
+  # ----------------------------------------------------------------------------
+  # 3b. Laravel Reverb Bridge (relays Redis Pub/Sub updates from the Python
   #     agent and PHP escalation engine into Reverb broadcasts)
   # ----------------------------------------------------------------------------
   core-crm-listener:
-    build:
-      context: ./apps/core
-      dockerfile: Dockerfile
-    image: ravisn-platform-core:latest
+    <<: *core-service
     container_name: ravisn-core-crm-listener
     command: php artisan crm:listen-updates
-    env_file: .env
-    environment:
-      - REDIS_CLIENT=phpredis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_STORE=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-      - APP_URL=${APP_URL:-http://localhost:8000}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
-    volumes:
-      - ./apps/core:/var/www/html
-    restart: always
     mem_limit: 200m
 
   # ----------------------------------------------------------------------------
   # 3c. Automation Workflow Trigger Consumer (Redis Stream -> WorkflowEngine)
   # ----------------------------------------------------------------------------
   core-automation-consumer:
-    build:
-      context: ./apps/core
-      dockerfile: Dockerfile
-    image: ravisn-platform-core:latest
+    <<: *core-service
     container_name: ravisn-core-automation-consumer
     command: php artisan automation:consume-triggers
-    env_file: .env
-    environment:
-      - REDIS_CLIENT=phpredis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_STORE=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-      - APP_URL=${APP_URL:-http://localhost:8000}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
-    volumes:
-      - ./apps/core:/var/www/html
-    restart: always
     mem_limit: 200m
 
   # ----------------------------------------------------------------------------
-  # 3b. Laravel Reverb (Real-Time WebSocket Broadcasting)
+  # 3d. Laravel Reverb (Real-Time WebSocket Broadcasting, proxied by nginx /app/)
   # ----------------------------------------------------------------------------
   core-reverb:
-    build:
-      context: ./apps/core
-      dockerfile: Dockerfile
-    image: ravisn-platform-core:latest
+    <<: *core-service
     container_name: ravisn-core-reverb
     command: php artisan reverb:start --host=0.0.0.0 --port=8080
-    env_file: .env
-    environment:
-      - REDIS_CLIENT=phpredis
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_URL=redis://redis:6379/0
-      - CACHE_STORE=redis
-      - SESSION_DRIVER=redis
-      - QUEUE_CONNECTION=redis
-      - APP_URL=${APP_URL:-http://localhost:8000}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      core:
-        condition: service_started
-    volumes:
-      - ./apps/core:/var/www/html
-    ports:
-      - "8080:8080"
-    restart: always
     mem_limit: 250m
 
   # ----------------------------------------------------------------------------
-  # 4. FastAPI Agent (Multi-Agent AI, LangGraph, RAG/pgvector, Inbound Intelligence)
+  # 4. FastAPI Agent (internal API: embeddings, simulator, knowledge parsing)
   # ----------------------------------------------------------------------------
   agent:
-    build:
-      context: ./apps/agent
-      dockerfile: Dockerfile
-    image: ravisn-platform-agent:latest
+    <<: *agent-service
     container_name: ravisn-agent
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
-    env_file: .env
-    environment:
-      - DATABASE_URL=${DATABASE_POOLER_URL}
-      - DATABASE_ASYNC_URL=${DATABASE_ASYNC_URL}
-      - REDIS_URL=redis://redis:6379/0
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - XAI_API_KEY=${XAI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - META_APP_SECRET=${META_APP_SECRET}
-      - META_WEBHOOK_VERIFY_TOKEN=${META_WEBHOOK_VERIFY_TOKEN}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./apps/agent:/app
-    ports:
-      - "8001:8000"
-    restart: always
     mem_limit: 800m
 
   # ----------------------------------------------------------------------------
-  # 5. FastAPI Inbound Stream Consumer (LangGraph Worker)
+  # 5. FastAPI Inbound Queue Consumer (LangGraph Worker)
   # ----------------------------------------------------------------------------
   agent-worker:
-    build:
-      context: ./apps/agent
-      dockerfile: Dockerfile
-    image: ravisn-platform-agent:latest
+    <<: *agent-service
     container_name: ravisn-agent-worker
     command: python -m src.workers.redis_consumer
-    env_file: .env
-    environment:
-      - DATABASE_URL=${DATABASE_POOLER_URL}
-      - DATABASE_ASYNC_URL=${DATABASE_ASYNC_URL}
-      - REDIS_URL=redis://redis:6379/0
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - XAI_API_KEY=${XAI_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - META_APP_SECRET=${META_APP_SECRET}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      agent:
-        condition: service_started
-    volumes:
-      - ./apps/agent:/app
-    restart: always
     mem_limit: 600m
 
   # ----------------------------------------------------------------------------
-  # 6. PostgreSQL Database with pgvector Extension
+  # 6. PostgreSQL Database with pgvector Extension (internal network only)
   # ----------------------------------------------------------------------------
   postgres:
     image: pgvector/pgvector:pg16
     container_name: ravisn-postgres
     environment:
-      - POSTGRES_USER=${DB_USERNAME:-postgres}
-      - POSTGRES_PASSWORD=${DB_PASSWORD:-secret}
-      - POSTGRES_DB=${DB_DATABASE:-ravisn_db}
+      - POSTGRES_USER=${POSTGRES_USER:-ravisn_user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      - POSTGRES_DB=${POSTGRES_DB:-ravisn_db}
     volumes:
       - pgdata:/var/lib/postgresql/data
     command: >
@@ -266,33 +176,31 @@ services:
                -c work_mem=32MB
                -c max_connections=100
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: always
     mem_limit: 1500m
-    ports:
-      - "5432:5432"
 
   # ----------------------------------------------------------------------------
-  # 7. Redis Cache, Session & Queue Broker
+  # 7. Redis Cache, Session & Queue Broker (password protected, internal only)
   # ----------------------------------------------------------------------------
   redis:
     image: redis:7.2-alpine
     container_name: ravisn-redis
-    command: redis-server --maxmemory 350mb --maxmemory-policy allkeys-lru --appendonly yes
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 350mb --maxmemory-policy noeviction --appendonly yes
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping | grep PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: always
     mem_limit: 450m
-    ports:
-      - "6379:6379"
 
 # ------------------------------------------------------------------------------
 # Persistent Storage Volumes

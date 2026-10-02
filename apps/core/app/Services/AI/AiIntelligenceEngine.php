@@ -144,7 +144,7 @@ class AiIntelligenceEngine
         ]);
 
         try {
-            Redis::publish(
+            Redis::connection('bridge')->publish(
                 config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                 $broadcastPayload
             );

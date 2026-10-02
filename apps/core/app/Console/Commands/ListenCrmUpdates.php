@@ -35,7 +35,7 @@ class ListenCrmUpdates extends Command
         $channel = config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates'));
         $this->info("⚡ [Laravel Reverb Bridge] Subscribed to Redis channel: [{$channel}]");
 
-        Redis::subscribe([$channel], function (string $message) {
+        Redis::connection('bridge')->subscribe([$channel], function (string $message) {
             try {
                 $payload = json_decode($message, true);
                 if (! is_array($payload)) {

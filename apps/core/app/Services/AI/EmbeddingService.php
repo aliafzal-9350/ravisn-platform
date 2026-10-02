@@ -3,10 +3,13 @@
 namespace App\Services\AI;
 
 use App\Exceptions\EmbeddingUnavailableException;
-use Illuminate\Support\Facades\Http;
 
 class EmbeddingService
 {
+    public function __construct(
+        protected AgentClient $agent
+    ) {}
+
     /**
      * Generate a 1536-dimensional vector embedding for the given text via
      * the AI agent service.
@@ -16,10 +19,8 @@ class EmbeddingService
      */
     public function embed(string $text): array
     {
-        $agentUrl = config('services.agent.url', env('AGENT_API_URL', 'http://agent:8000'));
-
         try {
-            $response = Http::timeout(10)->post("{$agentUrl}/api/v1/knowledge/embed", [
+            $response = $this->agent->request()->post('/api/v1/knowledge/embed', [
                 'text' => $text,
             ]);
         } catch (\Throwable $e) {

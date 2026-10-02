@@ -56,7 +56,7 @@ test('a user with no workspace cannot read or write anyone\'s prompt', function 
 
 test('the tenant\'s prompt settings travel with every AI task', function () {
     config(['services.meta.inbound_ai_stream_key' => 'test_inbound_ai_jobs']);
-    Illuminate\Support\Facades\Redis::del('test_inbound_ai_jobs');
+    Illuminate\Support\Facades\Redis::connection('bridge')->del('test_inbound_ai_jobs');
 
     $tenant = Tenant::create([
         'name' => 'Alpha Co',
@@ -88,8 +88,8 @@ test('the tenant\'s prompt settings travel with every AI task', function () {
         'messages' => [['from' => '15552223333', 'id' => 'wamid.PROMPT1', 'type' => 'text', 'text' => ['body' => 'hello']]],
     ]]]]]]))->handle();
 
-    $job = json_decode(Illuminate\Support\Facades\Redis::lpop('test_inbound_ai_jobs'), true);
-    Illuminate\Support\Facades\Redis::del('test_inbound_ai_jobs');
+    $job = json_decode(Illuminate\Support\Facades\Redis::connection('bridge')->lpop('test_inbound_ai_jobs'), true);
+    Illuminate\Support\Facades\Redis::connection('bridge')->del('test_inbound_ai_jobs');
 
     expect($job['ai_config'])->toMatchArray([
         'system_prompt' => 'You are Alpha\'s concierge.',

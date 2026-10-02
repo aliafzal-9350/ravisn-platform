@@ -25,15 +25,21 @@ import {
 import ClientLayout from '@/layouts/client-layout';
 import type { DashboardProps } from '@/types/dashboard';
 
+/** Shown wherever there is no real data yet; never substitute an invented figure. */
+const NONE = '—';
+const formatCost = (cost: string | null | undefined) => (cost == null ? NONE : `$${cost}`);
+const formatRate = (rate: number | null | undefined) => (rate == null ? NONE : `${rate}%`);
+
 export default function Dashboard({
     overview,
     usage = {
-        marketing: { count: 0, cost: '0.00' },
-        auth: { count: 0, cost: '0.00' },
-        utility: { count: 0, cost: '0.00' },
-        service: { count: 0, cost: '0.00' },
+        tracked: false,
+        marketing: { count: null, cost: null },
+        auth: { count: null, cost: null },
+        utility: { count: null, cost: null },
+        service: { count: null, cost: null },
         total_sent: 0,
-        total_cost_usd: '0.00',
+        total_cost_usd: null,
     },
     telemetry,
     trends = [],
@@ -50,14 +56,14 @@ export default function Dashboard({
     const activeThreadsCount = telemetry.open_threads ?? liveQueue.length;
 
     // Delivery Status donut calculations
-    const deliveryRate = telemetry.delivery_rate ?? 100;
+    const deliveryRate = telemetry.delivery_rate;
     const failedRate = telemetry.total_sent > 0
         ? Math.max(0, Math.round(((telemetry.total_failed || 0) / telemetry.total_sent) * 100))
-        : Math.max(0, Math.round(100 - deliveryRate));
+        : 0;
 
     const radius = 46;
     const circumference = 2 * Math.PI * radius;
-    const strokeDashoffset = circumference - (Math.min(100, Math.max(0, deliveryRate)) / 100) * circumference;
+    const strokeDashoffset = circumference - (Math.min(100, Math.max(0, deliveryRate ?? 0)) / 100) * circumference;
 
     // Chart dimensions & spline calculations
     const chartWidth = 700;
@@ -227,7 +233,7 @@ export default function Dashboard({
                                     </h3>
                                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
                                         <CheckCircle2 className="h-3 w-3" />
-                                        {telemetry.delivery_rate}% Deliv
+                                        {telemetry.delivery_rate == null ? 'No sends yet' : `${telemetry.delivery_rate}% Deliv`}
                                     </span>
                                 </div>
                             </div>
@@ -293,10 +299,10 @@ export default function Dashboard({
                                             </div>
                                             <div className="mt-2.5 flex items-baseline gap-1.5">
                                                 <span className="text-xl font-bold text-foreground">
-                                                    {usage.marketing?.count ?? 0}
+                                                    {usage.marketing?.count ?? NONE}
                                                 </span>
                                                 <span className="text-xs font-medium text-muted-foreground">
-                                                    (${usage.marketing?.cost ?? '0.00'})
+                                                    ({formatCost(usage.marketing?.cost)})
                                                 </span>
                                             </div>
                                         </div>
@@ -311,10 +317,10 @@ export default function Dashboard({
                                             </div>
                                             <div className="mt-2.5 flex items-baseline gap-1.5">
                                                 <span className="text-xl font-bold text-foreground">
-                                                    {usage.auth?.count ?? 0}
+                                                    {usage.auth?.count ?? NONE}
                                                 </span>
                                                 <span className="text-xs font-medium text-muted-foreground">
-                                                    (${usage.auth?.cost ?? '0.00'})
+                                                    ({formatCost(usage.auth?.cost)})
                                                 </span>
                                             </div>
                                         </div>
@@ -329,10 +335,10 @@ export default function Dashboard({
                                             </div>
                                             <div className="mt-2.5 flex items-baseline gap-1.5">
                                                 <span className="text-xl font-bold text-foreground">
-                                                    {usage.utility?.count ?? 0}
+                                                    {usage.utility?.count ?? NONE}
                                                 </span>
                                                 <span className="text-xs font-medium text-muted-foreground">
-                                                    (${usage.utility?.cost ?? '0.00'})
+                                                    ({formatCost(usage.utility?.cost)})
                                                 </span>
                                             </div>
                                         </div>
@@ -347,10 +353,10 @@ export default function Dashboard({
                                             </div>
                                             <div className="mt-2.5 flex items-baseline gap-1.5">
                                                 <span className="text-xl font-bold text-foreground">
-                                                    {usage.service?.count ?? 0}
+                                                    {usage.service?.count ?? NONE}
                                                 </span>
                                                 <span className="text-xs font-medium text-muted-foreground">
-                                                    (${usage.service?.cost === 'Free Tier' ? '0.00' : (usage.service?.cost ?? '0.00')})
+                                                    ({formatCost(usage.service?.cost)})
                                                 </span>
                                             </div>
                                         </div>
@@ -379,8 +385,13 @@ export default function Dashboard({
                                         <div className="mt-3">
                                             <span className="text-xs font-medium text-muted-foreground">Total Cost</span>
                                             <p className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400">
-                                                ${usage.total_cost_usd ?? '0.00'}
+                                                {formatCost(usage.total_cost_usd)}
                                             </p>
+                                            {!usage.tracked && (
+                                                <p className="mt-1 text-xs text-muted-foreground">
+                                                    Spend appears once messages record their Meta pricing category.
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
 
@@ -409,7 +420,7 @@ export default function Dashboard({
                                     <h2 className="text-base font-bold text-foreground">Delivery Status</h2>
                                 </div>
                                 <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                                    {deliveryRate}% Rate
+                                    {formatRate(deliveryRate)} Rate
                                 </span>
                             </div>
 
@@ -442,7 +453,7 @@ export default function Dashboard({
 
                                     <div className="absolute flex flex-col items-center justify-center text-center">
                                         <span className="text-2xl font-black tracking-tight text-foreground">
-                                            {deliveryRate}%
+                                            {formatRate(deliveryRate)}
                                         </span>
                                         <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                                             SUCCESS
@@ -474,7 +485,7 @@ export default function Dashboard({
                                     <p className="mt-1 text-lg font-bold text-emerald-600 dark:text-emerald-400">
                                         {telemetry.total_delivered.toLocaleString()}
                                     </p>
-                                    <span className="text-[10px] text-muted-foreground">Confirmed ({deliveryRate}%)</span>
+                                    <span className="text-[10px] text-muted-foreground">Confirmed ({formatRate(deliveryRate)})</span>
                                 </div>
 
                                 {/* Total Received */}

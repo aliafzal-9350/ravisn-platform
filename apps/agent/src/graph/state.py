@@ -2,6 +2,8 @@ from typing import TypedDict, Optional, List, Dict, Any
 
 
 class AgentState(TypedDict):
+    # Owning tenant of the conversation; scopes knowledge retrieval.
+    tenant_id: Optional[str]
     thread_id: str
     contact_id: str
     channel: str

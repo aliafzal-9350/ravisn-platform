@@ -56,6 +56,13 @@ return [
         'key' => env('GEMINI_API_KEY'),
     ],
 
+    // Internal FastAPI agent. Only Laravel calls it, authenticated with the
+    // shared token (the agent's INTERNAL_API_TOKEN).
+    'agent' => [
+        'url' => env('AGENT_API_URL', 'http://agent:8000'),
+        'internal_token' => env('AGENT_INTERNAL_TOKEN'),
+    ],
+
     'whatsapp' => [
         'app_id' => env('WHATSAPP_APP_ID', env('META_APP_ID')),
         'app_secret' => env('WHATSAPP_APP_SECRET', env('META_APP_SECRET')),

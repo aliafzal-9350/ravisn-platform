@@ -34,8 +34,9 @@ class WhatsappAccountController extends Controller
                 'phone_number_id' => $account->phone_number_id,
                 'waba_id' => $account->waba_id,
                 'app_id' => $account->app_id,
-                'app_secret' => $account->app_secret,
-                'access_token' => $account->access_token,
+                // Secrets stay server-side; the page only needs to know they exist.
+                'has_app_secret' => filled($account->app_secret),
+                'has_access_token' => filled($account->access_token),
                 'verified_at' => $account->verified_at?->format('Y-m-d H:i'),
                 'created_at' => $account->created_at->format('Y-m-d'),
             ]);

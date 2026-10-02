@@ -47,16 +47,22 @@ class PushInboundToAiJob implements ShouldQueue
     protected function aiConfig(?string $tenantId, Contact $contact): array
     {
         $tenant = $tenantId ? Tenant::find($tenantId) : null;
-        $settings = $tenant?->settings ?? [];
 
         return array_filter([
-            'system_prompt' => $settings['system_prompt'] ?? null,
-            'ai_tone' => $settings['ai_tone'] ?? null,
-            'prohibited_topics' => $settings['prohibited_topics'] ?? null,
-            'temperature' => $settings['temperature'] ?? null,
-            'company_name' => $tenant?->name,
+            ...($tenant?->aiConfig() ?? []),
             'contact_name' => $contact->name,
         ], fn ($value) => $value !== null && $value !== '');
+    }
+
+    /**
+     * The workspace-wide AI switch ("pure manual" strategy) overrides every
+     * thread: when it is off, no message is ever queued for an AI reply.
+     */
+    protected function tenantAllowsAi(?string $tenantId): bool
+    {
+        $tenant = $tenantId ? Tenant::find($tenantId) : null;
+
+        return $tenant === null || $tenant->aiRepliesEnabled();
     }
 
     public function handle(): void
@@ -100,7 +106,7 @@ class PushInboundToAiJob implements ShouldQueue
 
                         // Publish to Redis
                         try {
-                            Redis::publish(
+                            Redis::connection('bridge')->publish(
                                 config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                                 json_encode([
                                     'event' => 'MessageStatusUpdated',
@@ -232,7 +238,7 @@ class PushInboundToAiJob implements ShouldQueue
                     }
 
                     try {
-                        Redis::publish(
+                        Redis::connection('bridge')->publish(
                             config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                             json_encode([
                                 'event' => 'MessageCreated',
@@ -268,7 +274,7 @@ class PushInboundToAiJob implements ShouldQueue
                 }
 
                 try {
-                    Redis::publish(
+                    Redis::connection('bridge')->publish(
                         config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                         json_encode([
                             'event' => 'MessageCreated',
@@ -304,7 +310,7 @@ class PushInboundToAiJob implements ShouldQueue
 
                 // Forward to AI Engine if bot handling is active and customer hasn't opted out and not escalated
                 $thread->refresh();
-                if ($thread->bot_active && ! $isOptOut) {
+                if ($thread->bot_active && ! $isOptOut && $this->tenantAllowsAi($tenantId)) {
                     $aiJobPayload = json_encode([
                         'event_id' => (string) Str::uuid(),
                         'channel' => 'whatsapp',
@@ -317,13 +323,15 @@ class PushInboundToAiJob implements ShouldQueue
                         'content' => $content,
                         'media_id' => $mediaId,
                         'mime_type' => $mimeType,
-                        'access_token' => $channel->access_token,
+                        // The agent loads the (encrypted) channel token itself; the
+                        // queue never carries a usable Meta credential.
+                        'tenant_id' => $tenantId,
                         'ai_config' => $this->aiConfig($tenantId, $contact),
                         'timestamp' => now()->toISOString(),
                     ]);
 
                     $streamKey = config('services.meta.inbound_ai_stream_key', env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'));
-                    Redis::rpush($streamKey, $aiJobPayload);
+                    Redis::connection('bridge')->rpush($streamKey, $aiJobPayload);
                     Log::info("[PushInboundToAiJob] Queued AI Task to Redis [{$streamKey}] for Thread {$thread->id}");
                 }
             });
@@ -411,7 +419,7 @@ class PushInboundToAiJob implements ShouldQueue
                         }
 
                         try {
-                            Redis::publish(
+                            Redis::connection('bridge')->publish(
                                 config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                                 json_encode([
                                     'event' => 'MessageCreated',
@@ -447,7 +455,7 @@ class PushInboundToAiJob implements ShouldQueue
                     }
 
                     try {
-                        Redis::publish(
+                        Redis::connection('bridge')->publish(
                             config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                             json_encode([
                                 'event' => 'MessageCreated',
@@ -482,7 +490,7 @@ class PushInboundToAiJob implements ShouldQueue
                     }
 
                     $thread->refresh();
-                    if ($thread->bot_active && ! $isOptOut) {
+                    if ($thread->bot_active && ! $isOptOut && $this->tenantAllowsAi($tenantId)) {
                         $aiJobPayload = json_encode([
                             'event_id' => (string) Str::uuid(),
                             'channel' => $channelType,
@@ -494,13 +502,13 @@ class PushInboundToAiJob implements ShouldQueue
                             'message_type' => 'text',
                             'content' => $content,
                             'media_id' => null,
-                            'access_token' => $channel->access_token,
+                            'tenant_id' => $tenantId,
                             'ai_config' => $this->aiConfig($tenantId, $contact),
                             'timestamp' => now()->toISOString(),
                         ]);
 
                         $streamKey = config('services.meta.inbound_ai_stream_key', env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'));
-                        Redis::rpush($streamKey, $aiJobPayload);
+                        Redis::connection('bridge')->rpush($streamKey, $aiJobPayload);
                     }
                 });
             }

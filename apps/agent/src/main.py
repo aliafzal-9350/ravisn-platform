@@ -1,12 +1,13 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from src.config import settings
 from src.db.session import async_engine
 from src.api.v1 import health, agent, knowledge
+from src.api.deps import require_internal_token
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("fastapi_agent")
@@ -30,32 +31,41 @@ async def lifespan(app: FastAPI):
     await async_engine.dispose()
 
 
+# Interactive API docs would map the internal surface for an attacker; only
+# serve them outside production.
+docs_enabled = not settings.is_production
+
 app = FastAPI(
     title=settings.APP_NAME,
     description="Multi-Agent LangGraph Intelligence, pgvector RAG & Voice Transcription Engine",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
 )
 
-# CORS Setup
-origins = ["*"] if settings.CORS_ORIGINS == "*" else [o.strip() for o in settings.CORS_ORIGINS.split(",")]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins if origins != ["*"] else ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS: the agent is called server-to-server by Laravel, so browsers get no
+# access unless origins are listed explicitly. A wildcard is never combined
+# with credentials.
+origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+if origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials="*" not in origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-# Mount Routers under /api/v1 and /api
-app.include_router(health.router, prefix="/api/v1")
-app.include_router(agent.router, prefix="/api/v1")
-app.include_router(knowledge.router, prefix="/api/v1")
+internal_only = [Depends(require_internal_token)]
 
-# Also mount under /api for backwards compatibility and reverse proxy mapping
-app.include_router(health.router, prefix="/api")
-app.include_router(agent.router, prefix="/api")
-app.include_router(knowledge.router, prefix="/api")
+# Mount Routers under /api/v1 and /api (backwards compatibility). Health stays
+# open for container probes; everything else requires Laravel's internal token.
+for prefix in ("/api/v1", "/api"):
+    app.include_router(health.router, prefix=prefix)
+    app.include_router(agent.router, prefix=prefix, dependencies=internal_only)
+    app.include_router(knowledge.router, prefix=prefix, dependencies=internal_only)
 
 
 @app.get("/")

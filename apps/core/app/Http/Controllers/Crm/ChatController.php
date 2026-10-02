@@ -93,7 +93,7 @@ class ChatController extends Controller
 
         // Publish to Redis Pub/Sub for instant UI refresh
         try {
-            Redis::publish('crm_channel_updates', json_encode([
+            Redis::connection('bridge')->publish('crm_channel_updates', json_encode([
                 'event' => 'MessageCreated',
                 'thread_id' => (string) $thread->id,
                 'message_id' => (string) $message->id,

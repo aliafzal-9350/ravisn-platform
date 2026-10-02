@@ -9,7 +9,8 @@ from src.config import settings
 from src.graph.graph import compiled_agent_graph
 from src.services.meta_client import MetaGraphClient
 from src.db.session import async_session_factory
-from src.db.models import Message, Thread
+from src.db.models import ChannelIdentity, Message, Thread
+from src.services.laravel_crypt import decrypt_or_none
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("redis_consumer")
@@ -30,6 +31,34 @@ async def _bot_is_active(thread_id) -> bool:
     except Exception as e:
         logger.warning(f"[RedisConsumer] bot_active re-check failed, assuming active: {e}")
         return True
+
+
+async def _channel_access_token(channel_identity_id) -> str:
+    """The channel's Meta access token, decrypted from the shared database.
+
+    Laravel stores tokens with its `encrypted` cast and no longer puts them in
+    the Redis job, so a Redis read never exposes a usable credential.
+    """
+    if not channel_identity_id:
+        return ""
+    try:
+        async with async_session_factory() as session:
+            stored = await session.scalar(
+                select(ChannelIdentity.access_token).where(
+                    ChannelIdentity.id == uuid.UUID(str(channel_identity_id))
+                )
+            )
+    except Exception as e:
+        logger.error(f"[RedisConsumer] Could not load channel {channel_identity_id} token: {e}")
+        return ""
+
+    token = decrypt_or_none(stored, settings.APP_KEY)
+    if stored and not token:
+        logger.error(
+            f"[RedisConsumer] Channel {channel_identity_id} token could not be decrypted; "
+            "check that the agent's APP_KEY matches Laravel's."
+        )
+    return token or ""
 
 
 async def run_inbound_worker():
@@ -56,12 +85,17 @@ async def run_inbound_worker():
             channel = job_data.get("channel", "whatsapp")
             sender_id = job_data.get("sender_id")
             message_type = job_data.get("message_type", "text")
-            access_token = job_data.get("access_token", "")
+            # Jobs queued before the token moved out of Redis still carry it.
+            access_token = (
+                await _channel_access_token(job_data.get("channel_identity_id"))
+                or job_data.get("access_token", "")
+            )
 
             logger.info(f"📥 Processing AI Task for Thread: {thread_id} | Type: {message_type}")
 
             # 1. Execute LangGraph State Machine
             initial_state = {
+                "tenant_id": job_data.get("tenant_id"),
                 "thread_id": str(thread_id),
                 "contact_id": str(contact_id),
                 "channel": channel,

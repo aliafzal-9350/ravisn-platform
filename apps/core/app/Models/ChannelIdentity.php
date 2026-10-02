@@ -26,9 +26,23 @@ class ChannelIdentity extends Model
         'settings',
     ];
 
+    /**
+     * Never serialised: an agent-role user or an API response must not be able
+     * to read the Meta credentials of the channel.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'access_token',
+        'webhook_verify_token',
+    ];
+
     protected function casts(): array
     {
         return [
+            // Encrypted at rest with APP_KEY; the Python agent decrypts it with
+            // the same key (src/services/laravel_crypt.py).
+            'access_token' => 'encrypted',
             'is_active' => 'boolean',
             'settings' => 'array',
         ];

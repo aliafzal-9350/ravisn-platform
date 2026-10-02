@@ -25,6 +25,10 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
+        // Trust X-Forwarded-* from the nginx gateway (private docker network
+        // addresses only), so URLs and secure cookies are https behind TLS.
+        $middleware->trustProxies(at: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.1']);
+
         $middleware->redirectUsersTo(fn () => route('dashboard'));
 
         $middleware->web(append: [

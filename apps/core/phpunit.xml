@@ -36,6 +36,10 @@
         <env name="REDIS_HOST" value="redis"/>
         <env name="REDIS_PORT" value="6379"/>
         <env name="MAIL_MAILER" value="array"/>
+        <!-- Webhook tests post unsigned payloads; a developer's local secret must not change outcomes. -->
+        <env name="META_APP_SECRET" value="" force="true"/>
+        <env name="WHATSAPP_APP_SECRET" value="" force="true"/>
+        <env name="AGENT_INTERNAL_TOKEN" value="test-internal-token" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>

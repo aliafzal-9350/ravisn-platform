@@ -494,7 +494,7 @@ class ChatController extends Controller
         event(new ThreadUpdatedEvent($thread));
 
         try {
-            Redis::publish(
+            Redis::connection('bridge')->publish(
                 config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                 json_encode([
                     'event' => 'ThreadUpdated',

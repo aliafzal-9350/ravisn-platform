@@ -95,9 +95,22 @@ class DocumentParser
                 ];
             }
 
-            // Parse document.xml and collect paragraphs
+            // Parse document.xml and collect paragraphs. The upload is untrusted:
+            // never substitute entities (LIBXML_NOENT would let an external
+            // entity read server files such as .env), follow XIncludes or touch
+            // the network. A genuine DOCX body never declares a DTD, so refuse one.
             $dom = new \DOMDocument;
-            @$dom->loadXML($xmlContent, LIBXML_NOENT | LIBXML_XINCLUDE | LIBXML_NOERROR | LIBXML_NOWARNING);
+            $parsed = @$dom->loadXML($xmlContent, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+
+            if ($dom->doctype !== null || ($parsed && str_contains($xmlContent, '<!ENTITY'))) {
+                return [
+                    'success' => false,
+                    'text' => '',
+                    'page_count' => 0,
+                    'char_count' => 0,
+                    'error' => 'This document contains an XML DTD, which is not allowed. Re-save it from Word and upload again.',
+                ];
+            }
 
             $paragraphs = [];
             $pNodes = $dom->getElementsByTagName('p');

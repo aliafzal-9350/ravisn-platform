@@ -3,6 +3,7 @@
 use App\Jobs\ProcessKnowledgeIngestionJob;
 use App\Models\KnowledgeBase;
 use App\Models\KnowledgeChunk;
+use App\Models\Tenant;
 use App\Models\KnowledgeIngestionJob;
 use App\Models\User;
 use App\Services\DocumentParser;
@@ -19,7 +20,7 @@ function fakeEmbeddingResponse(): array
 test('uploading a document file dispatches an async ingestion job instead of processing synchronously', function () {
     Queue::fake();
     Storage::fake('local');
-    $user = User::first() ?? User::factory()->create();
+    $user = User::factory()->for(Tenant::factory())->create();
 
     $response = $this->actingAs($user)->postJson('/dashboard/knowledge/upload', [
         'file' => UploadedFile::fake()->createWithContent('notes.txt', 'Our support hours are 9am to 5pm.'),
@@ -42,10 +43,7 @@ test('ingestion job parses, chunks, embeds and completes for a text file', funct
         '*/api/v1/knowledge/embed' => Http::response(['embedding' => fakeEmbeddingResponse()], 200),
     ]);
 
-    $kb = KnowledgeBase::firstOrCreate(
-        ['name' => 'RAVISN Enterprise Knowledge Base'],
-        ['embedding_model' => 'text-embedding-3-small', 'dimension' => 1536, 'is_active' => true]
-    );
+    $kb = KnowledgeBase::forTenantOrCreate(Tenant::factory()->create());
 
     $storedPath = Storage::disk('local')->put('kb-uploads', UploadedFile::fake()->createWithContent('policy.txt', 'Refunds are processed within 7 business days.'));
 
@@ -63,8 +61,10 @@ test('ingestion job parses, chunks, embeds and completes for a text file', funct
     expect($ingestionJob->status)->toBe('completed');
     expect($ingestionJob->chunks_indexed)->toBeGreaterThan(0);
 
+    // Chunks inherit the knowledge base's owner so retrieval can filter on it.
     $this->assertDatabaseHas('knowledge_chunks', [
         'knowledge_base_id' => $kb->id,
+        'tenant_id' => $kb->tenant_id,
     ]);
 });
 
@@ -74,10 +74,7 @@ test('ingestion job fails loudly and indexes nothing when the embedding service 
         '*/api/v1/knowledge/embed' => Http::response([], 500),
     ]);
 
-    $kb = KnowledgeBase::firstOrCreate(
-        ['name' => 'RAVISN Enterprise Knowledge Base'],
-        ['embedding_model' => 'text-embedding-3-small', 'dimension' => 1536, 'is_active' => true]
-    );
+    $kb = KnowledgeBase::forTenantOrCreate(Tenant::factory()->create());
 
     $storedPath = Storage::disk('local')->put('kb-uploads', UploadedFile::fake()->createWithContent('outage.txt', 'This content should never be indexed with a fake vector.'));
 

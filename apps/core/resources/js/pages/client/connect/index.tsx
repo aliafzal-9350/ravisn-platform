@@ -382,7 +382,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Quality Rating</span>
                                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                            {whatsapp.quality_rating || 'GREEN (High Quality)'}
+                                            {whatsapp.quality_rating || '—'}
                                         </span>
                                     </div>
 
@@ -390,7 +390,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Messaging Limit</span>
                                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                            {whatsapp.messaging_limit || '1k / 24 Hours'}
+                                            {whatsapp.messaging_limit || '—'}
                                         </span>
                                     </div>
 
@@ -398,7 +398,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Message Window</span>
                                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                            {whatsapp.message_window || 'Active (24h Standard)'}
+                                            {whatsapp.message_window || '—'}
                                         </span>
                                     </div>
                                 </div>
@@ -464,7 +464,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                         </h3>
                                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                                             {instagram.is_connected
-                                                ? `@${instagram.username || 'instagram_account'} • ${instagram.account_type || 'Professional Business'}`
+                                                ? `@${instagram.username || 'instagram_account'} • ${instagram.account_type || 'Instagram'}`
                                                 : 'Direct Messaging • Not Connected'}
                                         </p>
                                     </div>
@@ -526,7 +526,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Account Type</span>
                                         <span className="font-medium text-slate-900 dark:text-slate-100">
-                                            {instagram.account_type || 'Professional Business'}
+                                            {instagram.account_type || '—'}
                                         </span>
                                     </div>
 
@@ -534,7 +534,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Permissions</span>
                                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                            {instagram.permissions || 'Direct Messaging & Story Replies'}
+                                            {instagram.permissions || '—'}
                                         </span>
                                     </div>
 
@@ -542,7 +542,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Auth State</span>
                                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                            {instagram.auth_state || 'Permanent System User'}
+                                            {instagram.auth_state || '—'}
                                         </span>
                                     </div>
 
@@ -550,7 +550,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Handover Mode</span>
                                         <span className="font-medium text-slate-900 dark:text-slate-100">
-                                            {instagram.handover_mode || 'Standby Protocol Active'}
+                                            {instagram.handover_mode || '—'}
                                         </span>
                                     </div>
                                 </div>
@@ -616,7 +616,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                         </h3>
                                         <p className="text-[11px] text-slate-500 dark:text-slate-400">
                                             {messenger.is_connected
-                                                ? `${messenger.page_name || 'Facebook Page'} • ${messenger.category || 'Official Page'}`
+                                                ? `${messenger.page_name || 'Facebook Page'} • ${messenger.category || 'Messenger'}`
                                                 : 'Meta Page Messaging • Not Connected'}
                                         </p>
                                     </div>
@@ -678,7 +678,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Category</span>
                                         <span className="font-medium text-slate-900 dark:text-slate-100">
-                                            {messenger.category || 'Business Page'}
+                                            {messenger.category || '—'}
                                         </span>
                                     </div>
 
@@ -686,7 +686,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Subscribed Webhooks</span>
                                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                            {messenger.subscribed_fields || 'messages, postbacks, reads'}
+                                            {messenger.subscribed_fields || '—'}
                                         </span>
                                     </div>
 
@@ -694,7 +694,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Messaging State</span>
                                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                            {messenger.messaging_state || 'Online / Operational'}
+                                            {messenger.messaging_state || '—'}
                                         </span>
                                     </div>
 
@@ -702,7 +702,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Response Rate</span>
                                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                            {messenger.response_rate || 'Instant (<1m)'}
+                                            {messenger.response_rate || '—'}
                                         </span>
                                     </div>
                                 </div>

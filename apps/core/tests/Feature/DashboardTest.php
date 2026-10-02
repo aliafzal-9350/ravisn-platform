@@ -32,6 +32,7 @@ test('authenticated users can visit the dual-engine operational dashboard', func
         ->has('recentCampaigns')
         ->has('liveQueue')
         ->where('telemetry.total_sent', 0)
-        ->where('telemetry.delivery_rate', fn ($rate) => (float)$rate == 100.0)
+        // Nothing sent yet: the rate is unknown, not an invented 100%.
+        ->where('telemetry.delivery_rate', null)
     );
 });

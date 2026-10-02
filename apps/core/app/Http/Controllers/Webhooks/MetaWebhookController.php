@@ -32,9 +32,9 @@ class MetaWebhookController extends Controller
             return response($challenge, 200)->header('Content-Type', 'text/plain');
         }
 
+        // Never log the submitted token: a near-miss would leak the real one.
         Log::warning('[MetaWebhookController] Verification Handshake Failed', [
             'mode' => $mode,
-            'token' => $token,
         ]);
 
         return response('Forbidden', 403);
@@ -48,23 +48,23 @@ class MetaWebhookController extends Controller
         $signature = $request->header('X-Hub-Signature-256');
         $rawPayload = $request->getContent();
 
-        $appSecret = config('services.meta.app_secret', env('META_APP_SECRET'));
+        $appSecret = config('services.meta.app_secret');
 
-        // In production, valid signature is mandatory. In other environments, if signature is provided or secret is set, validate it.
-        if (app()->environment('production')) {
+        // Whenever an app secret is configured, every delivery must carry a valid
+        // signature, in every environment. Unsigned traffic is only tolerated in
+        // local development with no secret set, and never in production.
+        if (filled($appSecret)) {
             if (! $this->validator->isValid($rawPayload, $signature, $appSecret)) {
-                Log::warning('[MetaWebhookController] Invalid Signature Rejected (production)', [
-                    'signature' => $signature,
+                Log::warning('[MetaWebhookController] Invalid or missing signature rejected', [
+                    'has_signature' => filled($signature),
                 ]);
+
                 return response()->json(['error' => 'Invalid signature'], 401);
             }
-        } elseif (! empty($signature) && ! empty($appSecret)) {
-            if (! $this->validator->isValid($rawPayload, $signature, $appSecret)) {
-                Log::warning('[MetaWebhookController] Invalid Signature Rejected', [
-                    'signature' => $signature,
-                ]);
-                return response()->json(['error' => 'Invalid signature'], 401);
-            }
+        } elseif (app()->environment('production')) {
+            Log::error('[MetaWebhookController] META_APP_SECRET is not configured; refusing unverifiable webhook.');
+
+            return response()->json(['error' => 'Webhook signature verification is not configured'], 401);
         }
 
         $payload = $request->json()->all();

@@ -7,6 +7,8 @@ router = APIRouter(prefix="/agent", tags=["AI Agent"])
 
 
 class DirectAgentRequest(BaseModel):
+    # Owning tenant: retrieval only searches this tenant's knowledge base.
+    tenant_id: Optional[str] = None
     thread_id: str
     contact_id: str
     channel: str = "whatsapp"
@@ -16,6 +18,7 @@ class DirectAgentRequest(BaseModel):
     content: Optional[str] = None
     media_id: Optional[str] = None
     access_token: Optional[str] = ""
+    ai_config: Optional[Dict[str, Any]] = None
 
 
 class CopilotRequest(BaseModel):
@@ -28,6 +31,7 @@ class CopilotRequest(BaseModel):
 async def execute_agent_pipeline(request: DirectAgentRequest) -> Dict[str, Any]:
     """Synchronous test endpoint to run the full LangGraph state machine directly."""
     initial_state = {
+        "tenant_id": request.tenant_id,
         "thread_id": request.thread_id,
         "contact_id": request.contact_id,
         "channel": request.channel,
@@ -42,7 +46,8 @@ async def execute_agent_pipeline(request: DirectAgentRequest) -> Dict[str, Any]:
         "intent": "",
         "final_response": "",
         "decision": "reply",
-        "telemetry": {}
+        "telemetry": {},
+        "ai_config": request.ai_config or {},
     }
 
     final_state = await compiled_agent_graph.ainvoke(initial_state)

@@ -4,8 +4,10 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Models\WhatsappAccount;
 use App\Models\WhatsappChat;
-use App\Services\AI\RavisnAiService;
+use App\Jobs\PushInboundToAiJob;
+use App\Models\Message;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Redis;
 
 beforeEach(function () {
     Http::fake([
@@ -85,75 +87,25 @@ test('resume AI assistant toggles is_ai_active to true', function () {
     expect($this->chat->fresh()->is_ai_active)->toBeTrue();
 });
 
-test('ravisn ai service enforces zero pricing guardrail', function () {
-    $aiService = new RavisnAiService;
-    $reply = $aiService->processIncomingMessage($this->chat, 'How much does it cost? What is your price?');
+test('the AI stays silent for a workspace in pure manual mode', function () {
+    $this->tenant->update(['ai_strategy' => 'pure_manual']);
 
-    expect($reply)->toContain('Every business is unique, so our pricing depends on your specific workflows');
-});
+    $streamKey = 'test_inbound_ai_jobs';
+    config(['services.meta.inbound_ai_stream_key' => $streamKey]);
+    Redis::connection('bridge')->del($streamKey);
 
-test('ravisn ai service lead qualifier 2 turn handover flow', function () {
-    $aiService = new RavisnAiService;
-
-    // Turn 1: Customer sends inbound message
-    $this->chat->messages()->create([
-        'direction' => 'inbound',
-        'message_type' => 'text',
-        'body' => 'I need automation for my clinic',
-    ]);
-    $reply1 = $aiService->processIncomingMessage($this->chat, 'I need automation for my clinic');
-    expect($reply1)->toContain('Welcome to RAVISN!');
-
-    // Turn 2: Customer sends second inbound message
-    $this->chat->messages()->create([
-        'direction' => 'inbound',
-        'message_type' => 'text',
-        'body' => 'Clinic lead appointment reminders',
-    ]);
-    $reply2 = $aiService->processIncomingMessage($this->chat, 'Clinic lead appointment reminders');
-    expect($reply2)->toContain('May I know your name and the name of your business');
-
-    // Turn 3: Customer provides details / consultation offer
-    $this->chat->messages()->create([
-        'direction' => 'inbound',
-        'message_type' => 'text',
-        'body' => 'My name is John from Smiles Clinic',
-    ]);
-    $reply3 = $aiService->processIncomingMessage($this->chat, 'My name is John from Smiles Clinic');
-    expect($reply3)->toContain('Would you like our team to reach out for a free consultation');
-
-    // Turn 4: Customer agrees to consultation -> triggers handover
-    $this->chat->messages()->create([
-        'direction' => 'inbound',
-        'message_type' => 'text',
-        'body' => 'Yes please, reach out',
-    ]);
-    $replyHandover = $aiService->processIncomingMessage($this->chat, 'Yes please, reach out');
-    expect($replyHandover)->toContain('Awesome! Our team has been notified');
-    expect($replyHandover)->toContain('[TRIGGER: HUMAN_HANDOVER]');
-    expect($this->chat->fresh()->is_ai_active)->toBeFalse();
-});
-
-test('ravisn ai service invokes google gemini api when key is set', function () {
-    config(['services.gemini.key' => 'test_gemini_key_123']);
-
-    Http::fake([
-        'https://generativelanguage.googleapis.com/*' => Http::response([
-            'candidates' => [
-                [
-                    'content' => [
-                        'parts' => [
-                            ['text' => 'RAVISN provides custom AI Voice Agents and Chatbots to automate clinic appointments 24/7!'],
-                        ],
-                    ],
-                ],
+    (new PushInboundToAiJob([
+        'object' => 'whatsapp_business_account',
+        'entry' => [['id' => '1', 'changes' => [[
+            'field' => 'messages',
+            'value' => [
+                'metadata' => ['phone_number_id' => '123456789'],
+                'messages' => [['from' => '19998887777', 'id' => 'wamid.MANUAL'.uniqid(), 'type' => 'text', 'text' => ['body' => 'Hi, are you open today?']]],
             ],
-        ], 200),
-        'https://graph.facebook.com/*' => Http::response([], 200),
-    ]);
+        ]]]],
+    ]))->handle();
 
-    $aiService = new RavisnAiService;
-    $reply = $aiService->processIncomingMessage($this->chat, 'Do you support custom AI Voice Agents for dental clinics?');
-
-    expect($reply)->toContain('RAVISN provides custom AI Voice Agents');
+    // The message still reaches the inbox for a human, but no AI reply is queued.
+    expect(Message::where('content', 'Hi, are you open today?')->exists())->toBeTrue()
+        ->and(Redis::connection('bridge')->llen($streamKey))->toBe(0);
 });

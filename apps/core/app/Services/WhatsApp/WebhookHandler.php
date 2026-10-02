@@ -11,7 +11,6 @@ use App\Models\SystemNotification;
 use App\Models\Tenant;
 use App\Models\WhatsappAccount;
 use App\Models\WhatsappMessage;
-use App\Services\AI\RavisnAiService;
 use App\Services\Automation\ConditionEvaluator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -272,12 +271,9 @@ class WebhookHandler
             }
 
             if (! $isOptOut) {
-                // Process Automation Flows
+                // Process Automation Flows. AI replies are not sent from here:
+                // PushInboundToAiJob routes the message to the tenant's own agent.
                 $this->processAutomationFlows($tenant, $customerPhone, $body, $account);
-
-                // Process RAVISN Master AI Automation Engine Directives
-                $aiService = app(RavisnAiService::class);
-                $aiService->processIncomingMessage($chat, $body);
             }
 
             // Dispatch outgoing webhooks for the tenant if configured
@@ -367,7 +363,7 @@ class WebhookHandler
 
                     // 2. Publish to Redis Pub/Sub for worker sync
                     try {
-                        Redis::publish(
+                        Redis::connection('bridge')->publish(
                             config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
                             json_encode([
                                 'event' => 'MessageStatusUpdated',

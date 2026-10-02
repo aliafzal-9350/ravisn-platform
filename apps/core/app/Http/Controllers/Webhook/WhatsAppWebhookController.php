@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Webhook;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\ProcessWhatsAppWebhookEvent;
+use App\Jobs\PushInboundToAiJob;
 use App\Services\Meta\WebhookEventDeduplicator;
 use App\Services\WhatsApp\WebhookHandler;
 use Illuminate\Http\JsonResponse;
@@ -28,31 +30,36 @@ class WhatsAppWebhookController extends Controller
 
     /**
      * Handle incoming webhook events (POST request from Meta).
+     *
+     * Only verifies, deduplicates and queues: Meta needs an answer within a few
+     * seconds, so no database-heavy work or AI inference happens in this request.
      */
     public function handle(Request $request, WebhookHandler $handler, ?string $tenant_token = null): JsonResponse
     {
-
         if (! $handler->isValidSignature($request, $tenant_token)) {
             Log::warning('WhatsApp Webhook signature verification failed', [
-                'tenant_token' => $tenant_token,
-                'signature_header' => $request->header('X-Hub-Signature-256'),
+                'has_tenant_token' => $tenant_token !== null,
             ]);
 
             return response()->json(['error' => 'Invalid signature'], 403);
         }
 
-        $payload = $request->all();
-        \Illuminate\Support\Facades\Log::info('WhatsApp Incoming Webhook:', $payload);
-
         // Split the delivery into single events and drop Meta retries atomically.
-        $events = app(WebhookEventDeduplicator::class)->newEvents($payload);
+        $events = app(WebhookEventDeduplicator::class)->newEvents($request->all());
 
         if (empty($events)) {
             return response()->json(['status' => 'ok', 'duplicate' => true], 200);
         }
 
         foreach ($events as $event) {
-            $handler->handle($event['payload']);
+            ProcessWhatsAppWebhookEvent::dispatch($event['payload']);
+
+            // Customer messages also go to the omnichannel pipeline: it creates
+            // the inbox thread and queues a reply from the tenant's own agent
+            // (their knowledge base and Prompt Tuning, never a shared persona).
+            if (! empty(data_get($event['payload'], 'entry.0.changes.0.value.messages'))) {
+                PushInboundToAiJob::dispatch($event['payload'], $event['redis_key']);
+            }
         }
 
         return response()->json(['status' => 'ok']);

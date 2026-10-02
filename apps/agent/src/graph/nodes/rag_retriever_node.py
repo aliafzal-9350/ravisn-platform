@@ -24,6 +24,7 @@ async def rag_retriever_node(state: AgentState) -> AgentState:
             chunks = await HybridRetrieverService.hybrid_search(
                 session=session,
                 query=query,
+                tenant_id=state.get("tenant_id"),
                 limit=3
             )
 

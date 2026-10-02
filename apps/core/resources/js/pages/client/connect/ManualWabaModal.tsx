@@ -57,6 +57,9 @@ export function ManualWabaModal({ open, onOpenChange, initialData }: ManualWabaM
         if (!phoneNumberId.trim()) {
             newErrors.phone_number_id = 'Phone Number ID is required.';
         }
+        if (!systemUserToken.trim()) {
+            newErrors.system_user_token = 'An access token is required so Meta can confirm this number.';
+        }
 
         if (Object.keys(newErrors).length > 0) {
             setErrors(newErrors);
@@ -83,7 +86,10 @@ export function ManualWabaModal({ open, onOpenChange, initialData }: ManualWabaM
                 },
                 onError: (errs) => {
                     setErrors(errs as Record<string, string>);
-                    toast.error('Failed to link WhatsApp account. Please check your credentials.');
+                    toast.error(
+                        (errs as Record<string, string>).system_user_token ??
+                            'Failed to link WhatsApp account. Please check your credentials.',
+                    );
                 },
                 onFinish: () => setSubmitting(false),
             }
@@ -182,13 +188,14 @@ export function ManualWabaModal({ open, onOpenChange, initialData }: ManualWabaM
                         <div className="space-y-1.5">
                             <div className="flex items-center justify-between">
                                 <Label htmlFor="system_user_token" className="text-xs font-semibold text-foreground">
-                                    Permanent System User Access Token
+                                    Permanent System User Access Token <span className="text-rose-500">*</span>
                                 </Label>
                                 <span className="text-[10px] text-muted-foreground">Meta Graph API v21.0</span>
                             </div>
                             <div className="relative">
                                 <Input
                                     id="system_user_token"
+                                    required
                                     type={showToken ? 'text' : 'password'}
                                     placeholder="EAAG..."
                                     value={systemUserToken}
@@ -203,8 +210,11 @@ export function ManualWabaModal({ open, onOpenChange, initialData }: ManualWabaM
                                     {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                                 </button>
                             </div>
+                            {errors.system_user_token && (
+                                <p className="text-[11px] text-rose-500">{errors.system_user_token}</p>
+                            )}
                             <p className="text-[11px] text-muted-foreground">
-                                Stored securely in PostgreSQL. Required for background automation and message dispatch.
+                                Verified with Meta before linking, then stored encrypted. Required for message dispatch.
                             </p>
                         </div>
                     </div>

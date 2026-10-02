@@ -14,6 +14,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -28,16 +29,7 @@ class KnowledgeController extends Controller
      */
     public function index(Request $request): Response
     {
-        $kb = KnowledgeBase::withCount('chunks')->first();
-        if (! $kb) {
-            $kb = KnowledgeBase::create([
-                'name' => 'RAVISN Enterprise Knowledge Base',
-                'description' => 'Unified RAG repository for company answers, products, services, and policies',
-                'embedding_model' => 'text-embedding-3-small',
-                'dimension' => 1536,
-                'is_active' => true,
-            ]);
-        }
+        $kb = $this->tenantKnowledgeBase($request);
 
         $chunks = KnowledgeChunk::where('knowledge_base_id', $kb->id)
             ->orderByDesc('created_at')
@@ -100,7 +92,7 @@ class KnowledgeController extends Controller
             'answer' => ['required', 'string'],
         ]);
 
-        $kb = $this->getOrCreateKnowledgeBase();
+        $kb = $this->tenantKnowledgeBase($request);
         $question = trim($validated['question']);
         $answer = trim($validated['answer']);
         $content = "Question: {$question}\n\nAnswer: {$answer}";
@@ -161,7 +153,7 @@ class KnowledgeController extends Controller
             'answer' => ['required', 'string'],
         ]);
 
-        $chunk = KnowledgeChunk::findOrFail($id);
+        $chunk = $this->tenantChunk($request, $id);
         $question = trim($validated['question']);
         $answer = trim($validated['answer']);
         $content = "Question: {$question}\n\nAnswer: {$answer}";
@@ -212,7 +204,7 @@ class KnowledgeController extends Controller
      */
     public function destroyEntry(Request $request, string $id): JsonResponse|RedirectResponse
     {
-        $chunk = KnowledgeChunk::findOrFail($id);
+        $chunk = $this->tenantChunk($request, $id);
         $chunk->delete();
 
         if ($request->wantsJson() || $request->is('api/*')) {
@@ -233,7 +225,7 @@ class KnowledgeController extends Controller
      */
     public function destroyAll(Request $request): JsonResponse|RedirectResponse
     {
-        $kb = $this->getOrCreateKnowledgeBase();
+        $kb = $this->tenantKnowledgeBase($request);
         KnowledgeChunk::where('knowledge_base_id', $kb->id)->delete();
 
         if ($request->wantsJson() || $request->is('api/*')) {
@@ -263,7 +255,7 @@ class KnowledgeController extends Controller
             'file' => ['nullable', 'file', 'mimes:txt,csv,pdf,doc,docx', 'max:15360'],
         ]);
 
-        $kb = $this->getOrCreateKnowledgeBase();
+        $kb = $this->tenantKnowledgeBase($request);
         $title = $request->input('title');
         $content = $request->input('content');
 
@@ -342,28 +334,35 @@ class KnowledgeController extends Controller
     /**
      * Delete document chunks (legacy compatibility).
      */
-    public function destroy(string $id): RedirectResponse
+    public function destroy(Request $request, string $id): RedirectResponse
     {
-        $chunk = KnowledgeChunk::findOrFail($id);
+        $chunk = $this->tenantChunk($request, $id);
         $chunk->delete();
 
         return back()->with('toast', ['type' => 'success', 'message' => 'Knowledge item deleted.']);
     }
 
     /**
-     * Helper to retrieve or create default KnowledgeBase.
+     * The caller's own knowledge base. Every tenant has exactly one and never
+     * sees another tenant's.
      */
-    private function getOrCreateKnowledgeBase(): KnowledgeBase
+    private function tenantKnowledgeBase(Request $request): KnowledgeBase
     {
-        return KnowledgeBase::firstOrCreate(
-            ['name' => 'RAVISN Enterprise Knowledge Base'],
-            [
-                'description' => 'Unified RAG repository for company answers, products, services, and policies',
-                'embedding_model' => 'text-embedding-3-small',
-                'dimension' => 1536,
-                'is_active' => true,
-            ]
-        );
+        $tenant = $request->user()?->tenant;
+        abort_if($tenant === null, 403, 'Your account is not attached to a workspace.');
+
+        return KnowledgeBase::forTenantOrCreate($tenant);
+    }
+
+    /**
+     * A chunk owned by the caller's tenant, or 404: another tenant's entry is
+     * indistinguishable from one that does not exist.
+     */
+    private function tenantChunk(Request $request, string $id): KnowledgeChunk
+    {
+        abort_unless(Str::isUuid($id), 404);
+
+        return KnowledgeChunk::forTenant($this->tenantKnowledgeBase($request)->tenant_id)->findOrFail($id);
     }
 
     /**

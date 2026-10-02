@@ -54,8 +54,18 @@ class Settings(BaseSettings):
     OPENAI_EMBEDDING_DIMENSIONS: int = 1536
 
     # Security & CORS
-    JWT_SECRET: str = "ravisn-secret-jwt-key"
-    CORS_ORIGINS: str = "*"
+    # Shared secret Laravel sends as X-Internal-Token on every agent API call.
+    # Required in production; the API refuses to serve without it.
+    INTERNAL_API_TOKEN: Optional[str] = None
+    # Laravel's APP_KEY, used to decrypt channel access tokens stored with
+    # Laravel's `encrypted` cast in the shared database.
+    APP_KEY: Optional[str] = None
+    # The agent is internal-only, so no browser origin is allowed by default.
+    CORS_ORIGINS: str = ""
+
+    @property
+    def is_production(self) -> bool:
+        return self.APP_ENV.lower() == "production"
 
 
 settings = Settings()
