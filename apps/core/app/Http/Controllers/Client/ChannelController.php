@@ -77,6 +77,7 @@ class ChannelController extends Controller
             'quality_rating' => $isWhatsappActive ? ($whatsapp->settings['quality_rating'] ?? '') : '',
             'messaging_limit' => $isWhatsappActive ? ($whatsapp->settings['messaging_limit'] ?? '') : '',
             'message_window' => $isWhatsappActive ? ($whatsapp->settings['message_window'] ?? '') : '',
+            'profile_picture_url' => $isWhatsappActive ? ($whatsapp->settings['profile_picture_url'] ?? '') : '',
             'status' => $isWhatsappActive ? ($whatsapp->settings['status'] ?? 'Connected') : 'Disconnected',
             'meta_api_version' => 'v21.0',
         ];
@@ -92,6 +93,7 @@ class ChannelController extends Controller
             'permissions' => $isInstagramActive ? ($instagram->settings['permissions'] ?? '') : '',
             'auth_state' => $isInstagramActive ? ($instagram->settings['auth_state'] ?? '') : '',
             'handover_mode' => $isInstagramActive ? ($instagram->settings['handover_mode'] ?? '') : '',
+            'profile_picture_url' => $isInstagramActive ? ($instagram->settings['profile_picture_url'] ?? '') : '',
             'status' => $isInstagramActive ? ($instagram->settings['status'] ?? 'Connected') : 'Disconnected',
         ];
 
@@ -105,6 +107,7 @@ class ChannelController extends Controller
             'subscribed_fields' => $isMessengerActive ? ($messenger->settings['subscribed_fields'] ?? '') : '',
             'messaging_state' => $isMessengerActive ? ($messenger->settings['messaging_state'] ?? '') : '',
             'response_rate' => $isMessengerActive ? ($messenger->settings['response_rate'] ?? '') : '',
+            'profile_picture_url' => $isMessengerActive ? ($messenger->settings['profile_picture_url'] ?? '') : '',
             'status' => $isMessengerActive ? ($messenger->settings['status'] ?? 'Connected') : 'Disconnected',
         ];
 
@@ -162,6 +165,10 @@ class ChannelController extends Controller
                         if (!empty($details['messaging_limit_tier'])) {
                             $settings['messaging_limit'] = $details['messaging_limit_tier'];
                         }
+                        $profile = $this->metaClient->getWhatsAppBusinessProfile($channel->external_id, $channel->access_token);
+                        if (!empty($profile['profile_picture_url'])) {
+                            $settings['profile_picture_url'] = $profile['profile_picture_url'];
+                        }
                         $channel->settings = $settings;
                         $channel->save();
                         $syncedCount++;
@@ -177,6 +184,9 @@ class ChannelController extends Controller
                         if (!empty($details['category'])) {
                             $settings['category'] = $details['category'];
                         }
+                        if (!empty($details['picture']['data']['url'])) {
+                            $settings['profile_picture_url'] = $details['picture']['data']['url'];
+                        }
                         $channel->settings = $settings;
                         $channel->save();
                         $syncedCount++;
@@ -191,6 +201,9 @@ class ChannelController extends Controller
                         }
                         if (!empty($details['name'])) {
                             $settings['profile_name'] = $details['name'];
+                        }
+                        if (!empty($details['profile_picture_url'])) {
+                            $settings['profile_picture_url'] = $details['profile_picture_url'];
                         }
                         $channel->settings = $settings;
                         $channel->save();
@@ -264,6 +277,9 @@ class ChannelController extends Controller
         $qualityRating = isset($details['quality_rating']) ? strtoupper($details['quality_rating']) : null;
         $messagingLimit = $details['messaging_limit_tier'] ?? null;
 
+        $profile = $this->metaClient->getWhatsAppBusinessProfile($phoneId, $token);
+        $profilePictureUrl = $profile['profile_picture_url'] ?? null;
+
         $verifyToken = (string) config('services.meta.webhook_verify_token');
 
         $channel = ChannelIdentity::updateOrCreate(
@@ -281,6 +297,7 @@ class ChannelController extends Controller
                     'phone_number' => $phoneNumber,
                     'quality_rating' => $qualityRating,
                     'messaging_limit' => $messagingLimit,
+                    'profile_picture_url' => $profilePictureUrl,
                     'status' => 'Connected',
                     'meta_api_version' => 'v21.0',
                     'waba_id' => $wabaId,
@@ -325,6 +342,7 @@ class ChannelController extends Controller
         ];
 
         // Enrich metadata dynamically
+        // Enrich metadata dynamically
         if ($channelType === 'whatsapp') {
             if ($externalId) {
                 $details = $this->metaClient->getPhoneNumberDetails($externalId, $token);
@@ -338,6 +356,10 @@ class ChannelController extends Controller
                     $settings['waba_id'] = $businessAccountId ?: '';
                     $settings['phone_number_id'] = $externalId;
                 }
+                $profile = $this->metaClient->getWhatsAppBusinessProfile($externalId, $token);
+                if (!empty($profile['profile_picture_url'])) {
+                    $settings['profile_picture_url'] = $profile['profile_picture_url'];
+                }
             }
             $accountName = $accountName ?: 'WhatsApp Business Number';
             $externalId = $externalId ?: 'waba_' . substr(md5($token), 0, 12);
@@ -349,10 +371,13 @@ class ChannelController extends Controller
                     $settings['page_name'] = $details['name'] ?? ($accountName ?? 'Facebook Page');
                     $settings['linked_page'] = $details['name'] ?? ($accountName ?? 'Facebook Page');
                     $settings['category'] = $details['category'] ?? 'Business Page';
+                    if (!empty($details['picture']['data']['url'])) {
+                        $settings['profile_picture_url'] = $details['picture']['data']['url'];
+                    }
                 }
             } else {
                 try {
-                    $pagesRes = \Illuminate\Support\Facades\Http::withToken($token)->get('https://graph.facebook.com/v21.0/me/accounts');
+                    $pagesRes = \Illuminate\Support\Facades\Http::withToken($token)->get('https://graph.facebook.com/v21.0/me/accounts?fields=id,name,category,picture.type(large){url}');
                     $pages = $pagesRes->json('data', []);
                     if (!empty($pages[0])) {
                         $firstPage = $pages[0];
@@ -361,6 +386,9 @@ class ChannelController extends Controller
                         $settings['page_name'] = $accountName;
                         $settings['linked_page'] = $accountName;
                         $settings['category'] = $firstPage['category'] ?? 'Business Page';
+                        if (!empty($firstPage['picture']['data']['url'])) {
+                            $settings['profile_picture_url'] = $firstPage['picture']['data']['url'];
+                        }
                     }
                 } catch (\Throwable $e) {
                     Log::warning("[ChannelController] Failed to auto-fetch FB pages: " . $e->getMessage());
@@ -374,7 +402,7 @@ class ChannelController extends Controller
             $settings['category'] = $settings['category'] ?? 'Business Page';
             $settings['subscribed_fields'] = 'messages, postbacks, reads';
             $settings['messaging_state'] = 'Online / Operational';
-            $settings['response_rate'] = '100% (Instant AI Active)';
+            $settings['response_rate'] = '100% (Instant Response Active)';
         } elseif ($channelType === 'instagram') {
             if ($externalId) {
                 $details = $this->metaClient->getInstagramDetails($externalId, $token);
@@ -382,6 +410,9 @@ class ChannelController extends Controller
                     $accountName = $details['username'] ?? $accountName;
                     $settings['username'] = $details['username'] ?? $accountName;
                     $settings['profile_name'] = $details['name'] ?? ($accountName ?? 'Instagram Business');
+                    if (!empty($details['profile_picture_url'])) {
+                        $settings['profile_picture_url'] = $details['profile_picture_url'];
+                    }
                 }
             }
             $accountName = $accountName ?: 'Instagram Business';

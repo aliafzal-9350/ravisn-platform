@@ -150,7 +150,28 @@ class MetaGraphClient
     }
 
     /**
-     * Retrieve Facebook Page metadata.
+     * Retrieve WhatsApp Business Profile (about, description, profile_picture_url).
+     */
+    public function getWhatsAppBusinessProfile(string $phoneNumberId, string $accessToken): ?array
+    {
+        $url = "{$this->baseUrl}/{$phoneNumberId}/whatsapp_business_profile";
+
+        $response = Http::withToken($accessToken)
+            ->timeout(10)
+            ->get($url, [
+                'fields' => 'about,address,description,email,profile_picture_url,websites,vertical',
+            ]);
+
+        if (! $response->successful()) {
+            return null;
+        }
+
+        $data = $response->json('data.0') ?? $response->json('data') ?? $response->json();
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Retrieve Facebook Page metadata and profile picture.
      */
     public function getPageDetails(string $pageId, string $accessToken): ?array
     {
@@ -159,7 +180,7 @@ class MetaGraphClient
         $response = Http::withToken($accessToken)
             ->timeout(10)
             ->get($url, [
-                'fields' => 'id,name,category,tasks,is_published',
+                'fields' => 'id,name,category,tasks,is_published,picture.type(large){url}',
             ]);
 
         if (! $response->successful()) {
