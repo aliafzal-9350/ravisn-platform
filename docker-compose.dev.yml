@@ -14,6 +14,9 @@ services:
       - ./apps/core/storage/app:/var/www/html/storage/app
     ports:
       - "127.0.0.1:8000:80"
+    # Source mounted from Windows/macOS boots slowly; allow for it locally.
+    healthcheck:
+      timeout: 30s
 
   core-worker:
     volumes:
@@ -47,6 +50,8 @@ services:
       - ./apps/agent:/app
     ports:
       - "127.0.0.1:8001:8000"
+    healthcheck:
+      timeout: 30s
 
   agent-worker:
     volumes:

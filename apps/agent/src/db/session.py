@@ -11,7 +11,9 @@ if db_url.startswith("postgresql://"):
 
 async_engine = create_async_engine(
     db_url,
-    echo=settings.DEBUG,
+    # Logging SQL also logs the values sent with it (customer messages), so
+    # it has its own switch instead of following DEBUG.
+    echo=settings.SQL_ECHO,
     pool_size=20,
     max_overflow=10,
     pool_pre_ping=True,
