@@ -191,6 +191,131 @@ class MetaGraphClient
     }
 
     /**
+     * Swap a short-lived Facebook Login token (about an hour) for a long-lived
+     * one (about 60 days). Page tokens derived from a long-lived token do not
+     * expire, so Messenger/Instagram keep working after the admin logs out.
+     * Without app credentials the original token is returned unchanged.
+     */
+    public function exchangeForLongLivedToken(string $userAccessToken): string
+    {
+        $appId = config('services.meta.app_id');
+        $appSecret = config('services.meta.app_secret');
+
+        if (blank($appId) || blank($appSecret)) {
+            return $userAccessToken;
+        }
+
+        $response = Http::timeout(10)->get("{$this->baseUrl}/oauth/access_token", [
+            'grant_type' => 'fb_exchange_token',
+            'client_id' => $appId,
+            'client_secret' => $appSecret,
+            'fb_exchange_token' => $userAccessToken,
+        ]);
+
+        if (! $response->successful() || blank($response->json('access_token'))) {
+            Log::warning('[MetaGraphClient] Long-lived token exchange failed; keeping the short-lived token', ['status' => $response->status()]);
+
+            return $userAccessToken;
+        }
+
+        return (string) $response->json('access_token');
+    }
+
+    /**
+     * Facebook Pages a Facebook Login token manages, each with its own Page
+     * access token (messages must be sent with the Page's token, not the
+     * person's) and its linked Instagram professional account, if any.
+     *
+     * @return list<array{id: string, name: string, category: ?string, access_token: ?string, picture_url: ?string, instagram: ?array{id: string, username: ?string, profile_picture_url: ?string}}>
+     */
+    public function getManagedPages(string $userAccessToken): array
+    {
+        $response = Http::withToken($userAccessToken)
+            ->timeout(10)
+            ->get("{$this->baseUrl}/me/accounts", [
+                'fields' => 'id,name,category,access_token,picture.type(large){url},instagram_business_account{id,username,profile_picture_url}',
+                'limit' => 100,
+            ]);
+
+        if (! $response->successful()) {
+            Log::warning('[MetaGraphClient] Failed to list managed Pages', ['status' => $response->status()]);
+
+            return [];
+        }
+
+        return collect($response->json('data', []))
+            ->filter(fn ($page) => ! empty($page['id']))
+            ->map(fn (array $page) => [
+                'id' => (string) $page['id'],
+                'name' => (string) ($page['name'] ?? $page['id']),
+                'category' => $page['category'] ?? null,
+                'access_token' => $page['access_token'] ?? null,
+                'picture_url' => $page['picture']['data']['url'] ?? null,
+                'instagram' => isset($page['instagram_business_account']['id']) ? [
+                    'id' => (string) $page['instagram_business_account']['id'],
+                    'username' => $page['instagram_business_account']['username'] ?? null,
+                    'profile_picture_url' => $page['instagram_business_account']['profile_picture_url'] ?? null,
+                ] : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * WhatsApp phone numbers a Facebook Login token can operate.
+     *
+     * The WABAs come from the token's granular scopes (debug_token, which
+     * needs the app credentials), falling back to the WABAs shared with the
+     * app's business.
+     *
+     * @return list<array{id: string, waba_id: string, display_phone_number: ?string, verified_name: ?string}>
+     */
+    public function getAccessibleWhatsAppNumbers(string $userAccessToken): array
+    {
+        $wabaIds = [];
+
+        $appId = config('services.meta.app_id');
+        $appSecret = config('services.meta.app_secret');
+        if (filled($appId) && filled($appSecret)) {
+            $debug = Http::timeout(10)->get("{$this->baseUrl}/debug_token", [
+                'input_token' => $userAccessToken,
+                'access_token' => "{$appId}|{$appSecret}",
+            ]);
+
+            foreach ($debug->json('data.granular_scopes', []) as $scope) {
+                if (in_array($scope['scope'] ?? null, ['whatsapp_business_management', 'whatsapp_business_messaging'], true)) {
+                    $wabaIds = [...$wabaIds, ...($scope['target_ids'] ?? [])];
+                }
+            }
+        }
+
+        if ($wabaIds === []) {
+            $shared = Http::withToken($userAccessToken)->timeout(10)->get("{$this->baseUrl}/me/client_whatsapp_business_accounts");
+            $wabaIds = array_column($shared->json('data', []), 'id');
+        }
+
+        $numbers = [];
+        foreach (array_unique(array_map('strval', $wabaIds)) as $wabaId) {
+            $response = Http::withToken($userAccessToken)
+                ->timeout(10)
+                ->get("{$this->baseUrl}/{$wabaId}/phone_numbers", ['fields' => 'id,display_phone_number,verified_name']);
+
+            foreach ($response->json('data', []) as $number) {
+                if (! empty($number['id'])) {
+                    $numbers[] = [
+                        'id' => (string) $number['id'],
+                        'waba_id' => $wabaId,
+                        'display_phone_number' => $number['display_phone_number'] ?? null,
+                        'verified_name' => $number['verified_name'] ?? null,
+                    ];
+                }
+            }
+        }
+
+        return $numbers;
+    }
+
+    /**
      * Retrieve Instagram Business Account metadata.
      */
     public function getInstagramDetails(string $igUserId, string $accessToken): ?array

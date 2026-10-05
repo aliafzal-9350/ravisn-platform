@@ -20,6 +20,12 @@ network only.
 | `ravisn-postgres` | PostgreSQL 16 + pgvector | — | Optional when using managed Postgres (Neon) |
 | `ravisn-redis` | Redis 7.2 (password protected) | — | `noeviction`: queued jobs are never silently evicted |
 
+**Storage:** all Laravel containers share the `corestorage` volume (`storage/app`): knowledge uploads,
+campaign and template media (served at `/storage/...`, which Meta fetches) and channel profile pictures.
+Back it up together with the database, e.g.
+`docker run --rm -v ravisn-platform_corestorage:/data -v $PWD:/backup alpine tar czf /backup/storage.tgz -C /data .`
+Set `MEDIA_DISK` only if you move these files to another disk (the S3 driver package is not installed yet).
+
 For local development, add the dev overlay. It mounts the source and publishes debug ports on
 `127.0.0.1` only:
 

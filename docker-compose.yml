@@ -40,6 +40,11 @@ x-core-service: &core-service
   image: ravisn-platform-core:latest
   env_file: .env
   environment: *core-env
+  # One storage volume shared by every Laravel container: a file uploaded in a
+  # web request (knowledge documents, campaign images) must be readable by the
+  # queue worker, and must survive redeploys. Include it in backups.
+  volumes:
+    - corestorage:/var/www/html/storage/app
   restart: always
   depends_on:
     postgres:
@@ -209,4 +214,6 @@ volumes:
   pgdata:
     driver: local
   redisdata:
+    driver: local
+  corestorage:
     driver: local

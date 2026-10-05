@@ -11,28 +11,34 @@ services:
   core:
     volumes:
       - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
     ports:
       - "127.0.0.1:8000:80"
 
   core-worker:
     volumes:
       - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
 
   core-scheduler:
     volumes:
       - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
 
   core-crm-listener:
     volumes:
       - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
 
   core-automation-consumer:
     volumes:
       - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
 
   core-reverb:
     volumes:
       - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
     ports:
       - "127.0.0.1:8080:8080"
 

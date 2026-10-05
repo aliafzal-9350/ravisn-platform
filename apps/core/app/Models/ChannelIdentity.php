@@ -54,6 +54,25 @@ class ChannelIdentity extends Model
     }
 
     /**
+     * Where the browser loads this channel's profile picture: our stored copy
+     * (see ChannelAvatarStore), or a Meta link saved before copies were kept.
+     */
+    public function avatarUrl(): ?string
+    {
+        $path = $this->settings['profile_picture_path'] ?? null;
+
+        if ($path) {
+            return route('client.connect.avatar', [
+                'channel' => $this->channel_type,
+                // Changes with the picture, so browsers never show a stale one.
+                'v' => pathinfo($path, PATHINFO_FILENAME),
+            ]);
+        }
+
+        return $this->settings['profile_picture_url'] ?? null;
+    }
+
+    /**
      * Restrict channels to those owned by the given tenant.
      */
     public function scopeForTenant(Builder $query, int|string|null $tenantId): Builder

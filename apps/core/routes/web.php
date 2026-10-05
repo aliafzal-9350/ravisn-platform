@@ -94,6 +94,11 @@ Route::middleware(['auth', 'verified'])
             // Omni-channel Thread Human Takeover Toggle API
             Route::patch('threads/{thread}/takeover', [CrmChatController::class, 'toggleTakeover'])->name('threads.takeover');
 
+            // Channel profile pictures (our stored copy, tenant scoped)
+            Route::get('connect/{channel}/avatar', [ChannelController::class, 'avatar'])
+                ->whereIn('channel', ['whatsapp', 'instagram', 'messenger'])
+                ->name('connect.avatar');
+
             // Notifications
             Route::post('notifications/{notification}/read', function (SystemNotification $notification) {
                 if ((string) $notification->tenant_id === (string) auth()->user()->tenant_id) {

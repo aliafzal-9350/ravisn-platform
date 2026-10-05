@@ -26,6 +26,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { jsonHeaders } from '@/lib/csrf';
+import type { AccountChoice } from './ChooseAccountModal';
+import { ChooseAccountModal } from './ChooseAccountModal';
 import { DisconnectModal } from './DisconnectModal';
 import { ManualWabaModal } from './ManualWabaModal';
 import { WebhookTokenModal } from './WebhookTokenModal';
@@ -158,6 +161,13 @@ export default function ConnectChannels(props: ConnectProps) {
     const [syncing, setSyncing] = React.useState(false);
     const [syncingChannel, setSyncingChannel] = React.useState<'whatsapp' | 'instagram' | 'messenger' | null>(null);
     const [manualWabaOpen, setManualWabaOpen] = React.useState(false);
+    // Set when one Facebook login reaches several accounts and the admin must pick one.
+    const [accountChoice, setAccountChoice] = React.useState<{
+        channelType: 'whatsapp' | 'instagram' | 'messenger';
+        token: string;
+        message: string;
+        choices: AccountChoice[];
+    } | null>(null);
     const [webhookTokenOpen, setWebhookTokenOpen] = React.useState(false);
     const [pageRolesOpen, setPageRolesOpen] = React.useState(false);
     const [disconnectState, setDisconnectState] = React.useState<{
@@ -200,6 +210,38 @@ export default function ConnectChannels(props: ConnectProps) {
         document.body.appendChild(script);
     }, [whatsapp_app_id]);
 
+    // Send a Facebook Login token; the server connects the one account it can
+    // reach, or answers with the accounts to choose from.
+    const connectWithToken = async (
+        channelType: 'whatsapp' | 'instagram' | 'messenger',
+        token: string,
+        externalId?: string,
+    ) => {
+        setSyncingChannel(channelType);
+        try {
+            const res = await fetch(`/dashboard/connect/${channelType}/token`, {
+                method: 'POST',
+                headers: jsonHeaders(),
+                body: JSON.stringify({ access_token: token, external_id: externalId }),
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok) {
+                setAccountChoice(null);
+                toast.success(data.message ?? 'Channel connected.');
+                router.reload();
+            } else if (Array.isArray(data.choices) && data.choices.length > 1) {
+                setAccountChoice({ channelType, token, message: data.message, choices: data.choices });
+            } else {
+                toast.error(data.message ?? 'Meta did not allow this connection.');
+            }
+        } catch {
+            toast.error('Could not reach the server. Please try again.');
+        } finally {
+            setSyncingChannel(null);
+        }
+    };
+
     // Launch Meta OAuth
     const launchMetaOAuth = (channelType: 'whatsapp' | 'instagram' | 'messenger' = 'whatsapp') => {
         if (!(window as any).FB) {
@@ -218,18 +260,7 @@ export default function ConnectChannels(props: ConnectProps) {
         (window as any).FB.login(
             (response: any) => {
                 if (response.authResponse?.accessToken) {
-                    const token = response.authResponse.accessToken;
-                    setSyncingChannel(channelType);
-                    router.post(
-                        `/dashboard/connect/${channelType}/token`,
-                        { access_token: token },
-                        {
-                            onSuccess: () =>
-                                toast.success(`Connected ${channelType.toUpperCase()} via Meta OAuth`),
-                            onFinish: () =>
-                                setSyncingChannel(null),
-                        }
-                    );
+                    connectWithToken(channelType, response.authResponse.accessToken);
                 } else {
                     toast.error('Meta Login was cancelled or not authorized.');
                 }
@@ -865,6 +896,15 @@ export default function ConnectChannels(props: ConnectProps) {
             </div>
 
             {/* Modals & Dialogs */}
+            <ChooseAccountModal
+                open={accountChoice !== null}
+                message={accountChoice?.message ?? ''}
+                choices={accountChoice?.choices ?? []}
+                submitting={syncingChannel !== null}
+                onChoose={(id) => accountChoice && connectWithToken(accountChoice.channelType, accountChoice.token, id)}
+                onOpenChange={(open) => !open && setAccountChoice(null)}
+            />
+
             <ManualWabaModal
                 open={manualWabaOpen}
                 onOpenChange={setManualWabaOpen}

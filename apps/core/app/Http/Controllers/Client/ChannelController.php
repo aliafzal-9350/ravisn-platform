@@ -5,18 +5,22 @@ namespace App\Http\Controllers\Client;
 use App\Http\Controllers\Controller;
 use App\Models\ChannelIdentity;
 use App\Models\WhatsappAccount;
+use App\Services\Meta\ChannelAvatarStore;
 use App\Services\Meta\MetaGraphClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class ChannelController extends Controller
 {
     public function __construct(
-        protected MetaGraphClient $metaClient
+        protected MetaGraphClient $metaClient,
+        protected ChannelAvatarStore $avatars
     ) {}
 
     /**
@@ -77,7 +81,7 @@ class ChannelController extends Controller
             'quality_rating' => $isWhatsappActive ? ($whatsapp->settings['quality_rating'] ?? '') : '',
             'messaging_limit' => $isWhatsappActive ? ($whatsapp->settings['messaging_limit'] ?? '') : '',
             'message_window' => $isWhatsappActive ? ($whatsapp->settings['message_window'] ?? '') : '',
-            'profile_picture_url' => $isWhatsappActive ? ($whatsapp->settings['profile_picture_url'] ?? '') : '',
+            'profile_picture_url' => $isWhatsappActive ? ($whatsapp->avatarUrl() ?? '') : '',
             'status' => $isWhatsappActive ? ($whatsapp->settings['status'] ?? 'Connected') : 'Disconnected',
             'meta_api_version' => 'v21.0',
         ];
@@ -93,7 +97,7 @@ class ChannelController extends Controller
             'permissions' => $isInstagramActive ? ($instagram->settings['permissions'] ?? '') : '',
             'auth_state' => $isInstagramActive ? ($instagram->settings['auth_state'] ?? '') : '',
             'handover_mode' => $isInstagramActive ? ($instagram->settings['handover_mode'] ?? '') : '',
-            'profile_picture_url' => $isInstagramActive ? ($instagram->settings['profile_picture_url'] ?? '') : '',
+            'profile_picture_url' => $isInstagramActive ? ($instagram->avatarUrl() ?? '') : '',
             'status' => $isInstagramActive ? ($instagram->settings['status'] ?? 'Connected') : 'Disconnected',
         ];
 
@@ -107,7 +111,7 @@ class ChannelController extends Controller
             'subscribed_fields' => $isMessengerActive ? ($messenger->settings['subscribed_fields'] ?? '') : '',
             'messaging_state' => $isMessengerActive ? ($messenger->settings['messaging_state'] ?? '') : '',
             'response_rate' => $isMessengerActive ? ($messenger->settings['response_rate'] ?? '') : '',
-            'profile_picture_url' => $isMessengerActive ? ($messenger->settings['profile_picture_url'] ?? '') : '',
+            'profile_picture_url' => $isMessengerActive ? ($messenger->avatarUrl() ?? '') : '',
             'status' => $isMessengerActive ? ($messenger->settings['status'] ?? 'Connected') : 'Disconnected',
         ];
 
@@ -160,17 +164,15 @@ class ChannelController extends Controller
                             $settings['verified_name'] = $details['verified_name'];
                         }
                         if (!empty($details['quality_rating'])) {
-                            $settings['quality_rating'] = strtoupper($details['quality_rating']) . ' (High Quality)';
+                            $settings['quality_rating'] = strtoupper($details['quality_rating']);
                         }
                         if (!empty($details['messaging_limit_tier'])) {
                             $settings['messaging_limit'] = $details['messaging_limit_tier'];
                         }
-                        $profile = $this->metaClient->getWhatsAppBusinessProfile($channel->external_id, $channel->access_token);
-                        if (!empty($profile['profile_picture_url'])) {
-                            $settings['profile_picture_url'] = $profile['profile_picture_url'];
-                        }
                         $channel->settings = $settings;
                         $channel->save();
+                        $profile = $this->metaClient->getWhatsAppBusinessProfile($channel->external_id, $channel->access_token);
+                        $this->avatars->attach($channel, $profile['profile_picture_url'] ?? null);
                         $syncedCount++;
                     }
                 } elseif ($channel->channel_type === 'messenger' && $channel->external_id && $channel->access_token) {
@@ -184,11 +186,9 @@ class ChannelController extends Controller
                         if (!empty($details['category'])) {
                             $settings['category'] = $details['category'];
                         }
-                        if (!empty($details['picture']['data']['url'])) {
-                            $settings['profile_picture_url'] = $details['picture']['data']['url'];
-                        }
                         $channel->settings = $settings;
                         $channel->save();
+                        $this->avatars->attach($channel, $details['picture']['data']['url'] ?? null);
                         $syncedCount++;
                     }
                 } elseif ($channel->channel_type === 'instagram' && $channel->external_id && $channel->access_token) {
@@ -202,11 +202,9 @@ class ChannelController extends Controller
                         if (!empty($details['name'])) {
                             $settings['profile_name'] = $details['name'];
                         }
-                        if (!empty($details['profile_picture_url'])) {
-                            $settings['profile_picture_url'] = $details['profile_picture_url'];
-                        }
                         $channel->settings = $settings;
                         $channel->save();
+                        $this->avatars->attach($channel, $details['profile_picture_url'] ?? null);
                         $syncedCount++;
                     }
                 }
@@ -277,9 +275,6 @@ class ChannelController extends Controller
         $qualityRating = isset($details['quality_rating']) ? strtoupper($details['quality_rating']) : null;
         $messagingLimit = $details['messaging_limit_tier'] ?? null;
 
-        $profile = $this->metaClient->getWhatsAppBusinessProfile($phoneId, $token);
-        $profilePictureUrl = $profile['profile_picture_url'] ?? null;
-
         $verifyToken = (string) config('services.meta.webhook_verify_token');
 
         $channel = ChannelIdentity::updateOrCreate(
@@ -297,7 +292,6 @@ class ChannelController extends Controller
                     'phone_number' => $phoneNumber,
                     'quality_rating' => $qualityRating,
                     'messaging_limit' => $messagingLimit,
-                    'profile_picture_url' => $profilePictureUrl,
                     'status' => 'Connected',
                     'meta_api_version' => 'v21.0',
                     'waba_id' => $wabaId,
@@ -305,6 +299,9 @@ class ChannelController extends Controller
                 ],
             ]
         );
+
+        $profile = $this->metaClient->getWhatsAppBusinessProfile($phoneId, $token);
+        $this->avatars->attach($channel, $profile['profile_picture_url'] ?? null);
 
         if ($request->wantsJson() || $request->is('api/*')) {
             return response()->json([
@@ -321,142 +318,198 @@ class ChannelController extends Controller
     }
 
     /**
-     * Update access token or credentials for a channel.
+     * Connect a channel from a Facebook Login token ("Connect with Meta").
+     *
+     * The login belongs to a person, so the channel is resolved from what that
+     * login can reach: exactly one WhatsApp number / Page / Instagram account
+     * is connected straight away, several ask the admin to choose (sent back as
+     * `external_id`), and none is refused. Messenger and Instagram store the
+     * Page's own token, which is what Meta requires for sending as the Page.
      */
     public function updateToken(Request $request, string $channelType): JsonResponse|RedirectResponse
     {
+        abort_unless(in_array($channelType, ['whatsapp', 'instagram', 'messenger'], true), 404);
+
         $validated = $request->validate([
             'access_token' => ['required', 'string'],
-            'external_id' => ['nullable', 'string'],
-            'business_account_id' => ['nullable', 'string'],
-            'account_name' => ['nullable', 'string'],
+            'external_id' => ['nullable', 'string', 'max:100'],
         ]);
 
-        $token = $validated['access_token'];
-        $externalId = $validated['external_id'] ?? null;
-        $businessAccountId = $validated['business_account_id'] ?? null;
-        $accountName = $validated['account_name'] ?? null;
-        $settings = [
-            'meta_api_version' => 'v21.0',
-            'status' => 'Connected',
-        ];
+        $tenantId = $this->tenantId($request);
+        $chosen = $validated['external_id'] ?? null;
 
-        // Enrich metadata dynamically
-        // Enrich metadata dynamically
-        if ($channelType === 'whatsapp') {
-            if ($externalId) {
-                $details = $this->metaClient->getPhoneNumberDetails($externalId, $token);
-                if ($details) {
-                    $accountName = $details['display_phone_number'] ?? $accountName;
-                    $settings['verified_name'] = $details['verified_name'] ?? ($accountName ?? 'WhatsApp Business');
-                    $settings['display_name'] = $details['verified_name'] ?? ($accountName ?? 'WhatsApp Business');
-                    $settings['phone_number'] = $details['display_phone_number'] ?? $accountName;
-                    $settings['quality_rating'] = ! empty($details['quality_rating']) ? strtoupper($details['quality_rating']) : null;
-                    $settings['messaging_limit'] = $details['messaging_limit_tier'] ?? null;
-                    $settings['waba_id'] = $businessAccountId ?: '';
-                    $settings['phone_number_id'] = $externalId;
-                }
-                $profile = $this->metaClient->getWhatsAppBusinessProfile($externalId, $token);
-                if (!empty($profile['profile_picture_url'])) {
-                    $settings['profile_picture_url'] = $profile['profile_picture_url'];
-                }
-            }
-            $accountName = $accountName ?: 'WhatsApp Business Number';
-            $externalId = $externalId ?: 'waba_' . substr(md5($token), 0, 12);
-        } elseif ($channelType === 'messenger') {
-            if ($externalId) {
-                $details = $this->metaClient->getPageDetails($externalId, $token);
-                if ($details) {
-                    $accountName = $details['name'] ?? $accountName;
-                    $settings['page_name'] = $details['name'] ?? ($accountName ?? 'Facebook Page');
-                    $settings['linked_page'] = $details['name'] ?? ($accountName ?? 'Facebook Page');
-                    $settings['category'] = $details['category'] ?? 'Business Page';
-                    if (!empty($details['picture']['data']['url'])) {
-                        $settings['profile_picture_url'] = $details['picture']['data']['url'];
-                    }
-                }
-            } else {
-                try {
-                    $pagesRes = \Illuminate\Support\Facades\Http::withToken($token)->get('https://graph.facebook.com/v21.0/me/accounts?fields=id,name,category,picture.type(large){url}');
-                    $pages = $pagesRes->json('data', []);
-                    if (!empty($pages[0])) {
-                        $firstPage = $pages[0];
-                        $externalId = $firstPage['id'] ?? null;
-                        $accountName = $firstPage['name'] ?? 'Facebook Page';
-                        $settings['page_name'] = $accountName;
-                        $settings['linked_page'] = $accountName;
-                        $settings['category'] = $firstPage['category'] ?? 'Business Page';
-                        if (!empty($firstPage['picture']['data']['url'])) {
-                            $settings['profile_picture_url'] = $firstPage['picture']['data']['url'];
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    Log::warning("[ChannelController] Failed to auto-fetch FB pages: " . $e->getMessage());
-                }
-            }
-            $accountName = $accountName ?: 'Facebook Page';
-            $externalId = $externalId ?: 'fb_page_' . substr(md5($token), 0, 12);
-            $settings['page_id'] = $externalId;
-            $settings['page_name'] = $accountName;
-            $settings['linked_page'] = $accountName;
-            $settings['category'] = $settings['category'] ?? 'Business Page';
-            $settings['subscribed_fields'] = 'messages, postbacks, reads';
-            $settings['messaging_state'] = 'Online / Operational';
-            $settings['response_rate'] = '100% (Instant Response Active)';
-        } elseif ($channelType === 'instagram') {
-            if ($externalId) {
-                $details = $this->metaClient->getInstagramDetails($externalId, $token);
-                if ($details) {
-                    $accountName = $details['username'] ?? $accountName;
-                    $settings['username'] = $details['username'] ?? $accountName;
-                    $settings['profile_name'] = $details['name'] ?? ($accountName ?? 'Instagram Business');
-                    if (!empty($details['profile_picture_url'])) {
-                        $settings['profile_picture_url'] = $details['profile_picture_url'];
-                    }
-                }
-            }
-            $accountName = $accountName ?: 'Instagram Business';
-            $externalId = $externalId ?: 'ig_user_' . substr(md5($token), 0, 12);
-            $settings['ig_scoped_id'] = $externalId;
-            $settings['username'] = $settings['username'] ?? $accountName;
-            $settings['profile_name'] = $settings['profile_name'] ?? $accountName;
-            $settings['account_type'] = 'Professional Business';
-            $settings['meta_portfolio'] = $businessAccountId ?: ($accountName . ' Portfolio');
-            $settings['permissions'] = 'Direct Messaging & Story Replies';
-            $settings['auth_state'] = 'Permanent System User';
-            $settings['handover_mode'] = 'Standby Protocol Active';
+        $token = $this->metaClient->exchangeForLongLivedToken($validated['access_token']);
+        $candidates = $this->connectableAccounts($channelType, $token);
+
+        if (filled($chosen)) {
+            $candidates = array_values(array_filter($candidates, fn (array $candidate) => $candidate['external_id'] === $chosen));
         }
 
-        $verifyToken = (string) config('services.meta.webhook_verify_token');
+        if (count($candidates) !== 1) {
+            return $this->chooseAccountResponse($request, $channelType, $candidates, filled($chosen));
+        }
 
-        $tenantId = $this->tenantId($request);
-        $this->assertAssetNotOwnedByAnotherTenant($externalId, $tenantId);
+        $candidate = $candidates[0];
+        $this->assertAssetNotOwnedByAnotherTenant($candidate['external_id'], $tenantId);
+
+        if ($channelType === 'whatsapp') {
+            $candidate = $this->withWhatsAppDetails($candidate);
+        }
+
+        // Keep the stored picture when the same account is re-authorised.
+        $existing = ChannelIdentity::forTenant($tenantId)->where('channel_type', $channelType)->first();
+        $kept = $existing && $existing->external_id === $candidate['external_id']
+            ? array_intersect_key($existing->settings ?? [], ['profile_picture_path' => true])
+            : [];
 
         $channel = ChannelIdentity::updateOrCreate(
             ['tenant_id' => $tenantId, 'channel_type' => $channelType],
             [
-                'account_name' => $accountName,
-                'access_token' => $token,
-                'external_id' => $externalId,
-                'business_account_id' => $businessAccountId,
-                'webhook_verify_token' => $verifyToken,
+                'account_name' => $candidate['account_name'],
+                'access_token' => $candidate['access_token'],
+                'external_id' => $candidate['external_id'],
+                'business_account_id' => $candidate['business_account_id'],
+                'webhook_verify_token' => (string) config('services.meta.webhook_verify_token'),
                 'is_active' => true,
-                'settings' => $settings,
+                'settings' => array_filter($candidate['settings'], fn ($value) => $value !== null) + $kept + [
+                    'status' => 'Connected',
+                    'meta_api_version' => 'v21.0',
+                ],
             ]
         );
+
+        $this->avatars->attach($channel, $candidate['avatar_url']);
+
+        $message = "{$candidate['label']} connected.";
 
         if ($request->wantsJson() || $request->is('api/*')) {
             return response()->json([
                 'success' => true,
-                'message' => "Channel {$channelType} credentials updated successfully.",
-                'channel' => $channel,
+                'message' => $message,
+                'channel' => $channel->only(['id', 'channel_type', 'account_name', 'external_id', 'is_active']),
             ]);
         }
 
-        return back()->with('toast', [
-            'type' => 'success',
-            'message' => "Channel {$channelType} credentials updated successfully.",
-        ]);
+        return back()->with('toast', ['type' => 'success', 'message' => $message]);
+    }
+
+    /**
+     * Everything of the given type a Facebook Login token can operate.
+     *
+     * @return list<array{external_id: string, label: string, account_name: string, access_token: string, business_account_id: ?string, avatar_url: ?string, settings: array<string, mixed>}>
+     */
+    protected function connectableAccounts(string $channelType, string $token): array
+    {
+        if ($channelType === 'whatsapp') {
+            return array_map(fn (array $number) => [
+                'external_id' => $number['id'],
+                'label' => trim(($number['verified_name'] ?? 'WhatsApp').' '.($number['display_phone_number'] ?? $number['id'])),
+                'account_name' => $number['display_phone_number'] ?? $number['id'],
+                'access_token' => $token,
+                'business_account_id' => $number['waba_id'],
+                'avatar_url' => null,
+                'settings' => [
+                    'verified_name' => $number['verified_name'],
+                    'display_name' => $number['verified_name'],
+                    'phone_number' => $number['display_phone_number'],
+                    'waba_id' => $number['waba_id'],
+                    'phone_number_id' => $number['id'],
+                ],
+            ], $this->metaClient->getAccessibleWhatsAppNumbers($token));
+        }
+
+        $pages = array_filter($this->metaClient->getManagedPages($token), fn (array $page) => filled($page['access_token']));
+
+        if ($channelType === 'messenger') {
+            return array_values(array_map(fn (array $page) => [
+                'external_id' => $page['id'],
+                'label' => $page['name'],
+                'account_name' => $page['name'],
+                'access_token' => $page['access_token'],
+                'business_account_id' => null,
+                'avatar_url' => $page['picture_url'],
+                'settings' => [
+                    'page_id' => $page['id'],
+                    'page_name' => $page['name'],
+                    'linked_page' => $page['name'],
+                    'category' => $page['category'],
+                ],
+            ], $pages));
+        }
+
+        // Instagram messaging runs through the linked Facebook Page.
+        return array_values(array_map(fn (array $page) => [
+            'external_id' => $page['instagram']['id'],
+            'label' => '@'.($page['instagram']['username'] ?? $page['instagram']['id']),
+            'account_name' => $page['instagram']['username'] ?? $page['instagram']['id'],
+            'access_token' => $page['access_token'],
+            'business_account_id' => $page['id'],
+            'avatar_url' => $page['instagram']['profile_picture_url'],
+            'settings' => [
+                'ig_scoped_id' => $page['instagram']['id'],
+                'username' => $page['instagram']['username'],
+                'profile_name' => $page['instagram']['username'],
+                'linked_page' => $page['name'],
+            ],
+        ], array_filter($pages, fn (array $page) => $page['instagram'] !== null)));
+    }
+
+    /**
+     * Quality, limit and picture of the chosen WhatsApp number, from Meta.
+     *
+     * @param  array<string, mixed>  $candidate
+     * @return array<string, mixed>
+     */
+    protected function withWhatsAppDetails(array $candidate): array
+    {
+        $details = $this->metaClient->getPhoneNumberDetails($candidate['external_id'], $candidate['access_token']) ?? [];
+        $profile = $this->metaClient->getWhatsAppBusinessProfile($candidate['external_id'], $candidate['access_token']) ?? [];
+
+        $candidate['settings']['quality_rating'] = isset($details['quality_rating']) ? strtoupper($details['quality_rating']) : null;
+        $candidate['settings']['messaging_limit'] = $details['messaging_limit_tier'] ?? null;
+        $candidate['avatar_url'] = $profile['profile_picture_url'] ?? null;
+
+        return $candidate;
+    }
+
+    /**
+     * Nothing, or more than one thing, matched: explain, and offer the choices.
+     *
+     * @param  list<array<string, mixed>>  $candidates
+     */
+    protected function chooseAccountResponse(Request $request, string $channelType, array $candidates, bool $chosenNotFound): JsonResponse|RedirectResponse
+    {
+        $what = ['whatsapp' => 'WhatsApp number', 'messenger' => 'Facebook Page', 'instagram' => 'Instagram account'][$channelType];
+
+        $message = match (true) {
+            $chosenNotFound => "That {$what} is not available to this Facebook login.",
+            $candidates !== [] => "This Facebook login can reach several of these. Choose which {$what} to connect.",
+            $channelType === 'whatsapp' => 'No WhatsApp number is shared with this Facebook login. Use "Connect manually" with your Phone Number ID and a system user token.',
+            $channelType === 'instagram' => 'None of the Facebook Pages this login manages has a linked Instagram professional account.',
+            default => 'This Facebook login does not manage any Facebook Page.',
+        };
+
+        $choices = array_map(fn (array $candidate) => ['id' => $candidate['external_id'], 'label' => $candidate['label']], $candidates);
+
+        if ($request->wantsJson() || $request->is('api/*')) {
+            return response()->json(['success' => false, 'message' => $message, 'choices' => $choices], 422);
+        }
+
+        return back()->withErrors(['access_token' => $message]);
+    }
+
+    /**
+     * The tenant's stored copy of a channel's profile picture.
+     */
+    public function avatar(Request $request, string $channelType): StreamedResponse
+    {
+        $channel = ChannelIdentity::forTenant($this->tenantId($request))->where('channel_type', $channelType)->first();
+        $path = $channel?->settings['profile_picture_path'] ?? null;
+        $disk = Storage::disk($this->avatars->disk());
+
+        abort_unless($path && $disk->exists($path), 404);
+
+        return $disk->response($path, null, ['Cache-Control' => 'private, max-age=604800']);
     }
 
     /**

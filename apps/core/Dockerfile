@@ -45,6 +45,12 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction --ignore-pl
 # Install Frontend dependencies and compile Vite + Wayfinder assets
 RUN npm install --legacy-peer-deps && npm run build
 
+# Public uploads (campaign header images, template media) are served from
+# public/storage, which Meta must be able to fetch. The link points into the
+# storage volume, so it survives redeploys.
+RUN mkdir -p /var/www/html/storage/app/public \
+    && ln -sfn /var/www/html/storage/app/public /var/www/html/public/storage
+
 # Fix file permissions for Laravel storage and cache
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache \
     && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache

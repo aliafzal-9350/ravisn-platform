@@ -42,6 +42,9 @@ return [
         'whatsapp_phone_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
         'whatsapp_waba_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
         'whatsapp_system_token' => env('WHATSAPP_SYSTEM_USER_ACCESS_TOKEN', env('META_ACCESS_TOKEN')),
+        // Disk for files copied from Meta (channel avatars, customer media).
+        // "local" lives on the shared storage volume; any configured disk works.
+        'media_disk' => env('MEDIA_DISK', 'local'),
         'inbound_ai_stream_key' => env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'),
         'crm_broadcast_channel' => env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates'),
     ],
