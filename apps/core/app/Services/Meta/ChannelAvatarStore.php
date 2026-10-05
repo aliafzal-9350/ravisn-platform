@@ -18,12 +18,6 @@ class ChannelAvatarStore
 {
     public const MAX_BYTES = 2 * 1024 * 1024;
 
-    /**
-     * Only Meta's own image hosts are fetched, so a crafted URL cannot make the
-     * server request internal addresses.
-     */
-    protected const ALLOWED_HOSTS = '/(^|\.)(fbcdn\.net|fbsbx\.com|facebook\.com|whatsapp\.net|cdninstagram\.com)$/i';
-
     protected const EXTENSIONS = [
         'image/jpeg' => 'jpg',
         'image/png' => 'png',
@@ -61,8 +55,8 @@ class ChannelAvatarStore
 
     protected function download(ChannelIdentity $channel, ?string $remoteUrl): ?string
     {
-        if (! $remoteUrl || ! str_starts_with($remoteUrl, 'https://')
-            || ! preg_match(self::ALLOWED_HOSTS, (string) parse_url($remoteUrl, PHP_URL_HOST))) {
+        // Only Meta's own image hosts are fetched (see MetaCdn).
+        if (! MetaCdn::allows($remoteUrl)) {
             return null;
         }
 

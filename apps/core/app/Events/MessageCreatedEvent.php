@@ -90,7 +90,7 @@ class MessageCreatedEvent implements ShouldBroadcastNow
                     'channel_type' => $this->message->channel_type,
                     'message_type' => $this->message->message_type ?? 'text',
                     'content' => $this->message->content,
-                    'media_url' => $this->message->media_url,
+                    'media_url' => $this->message->mediaUrl(),
                     'media_mime_type' => $this->message->media_mime_type,
                     'whisper_transcript' => $whisperTranscript,
                     'is_ai_generated' => (bool) $this->message->is_ai_generated,

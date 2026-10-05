@@ -12,6 +12,7 @@ import {
     requestNotificationPermission,
     type RealtimeMessage,
     type RealtimeStatusUpdate,
+    type RealtimeMediaReady,
 } from '@/echo';
 import type { ContactDetails, ThreadItem } from './Components/ConversationList';
 import { ConversationList } from './Components/ConversationList';
@@ -331,6 +332,15 @@ export default function Inbox({
                 setMessages((prev) =>
                     prev.map((m) =>
                         m.id === statusUpdate.message_id ? { ...m, status: statusUpdate.status } : m
+                    )
+                );
+            },
+            (media: RealtimeMediaReady) => {
+                setMessages((prev) =>
+                    prev.map((m) =>
+                        m.id === media.message_id
+                            ? { ...m, media_url: media.media_url, media_mime_type: media.media_mime_type ?? m.media_mime_type }
+                            : m
                     )
                 );
             }

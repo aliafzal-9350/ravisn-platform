@@ -210,6 +210,10 @@ class PushInboundToAiJob implements ShouldQueue
                     'raw_payload' => $rawMsg,
                 ]);
 
+                if ($mediaId) {
+                    DownloadInboundMediaJob::dispatch((string) $message->id)->afterCommit();
+                }
+
                 $thread->update(['last_message_at' => now()]);
 
                 // Mandatory Opt-Out Logic: Regex check for ^(stop|unsubscribe|cancel)$ (case-insensitive)
@@ -381,17 +385,31 @@ class PushInboundToAiJob implements ShouldQueue
                     $contact->update(['last_inbound_at' => now()]);
 
                     $content = $msgEvent['message']['text'] ?? null;
+                    $attachment = $msgEvent['message']['attachments'][0] ?? null;
+                    $attachmentUrl = $attachment['payload']['url'] ?? null;
+                    $storedType = match ($attachment['type'] ?? null) {
+                        'image' => 'image',
+                        'audio' => 'audio',
+                        'video' => 'video',
+                        'file' => 'document',
+                        default => 'text',
+                    };
                     $message = Message::create([
                         'thread_id' => $thread->id,
                         'contact_id' => $contact->id,
                         'direction' => 'inbound',
                         'channel_type' => $channelType,
                         'external_message_id' => $msgEvent['message']['mid'] ?? null,
-                        'message_type' => 'text',
+                        'message_type' => $storedType,
                         'content' => $content,
                         'status' => 'received',
+                        'media_url' => $attachmentUrl,
                         'raw_payload' => $msgEvent,
                     ]);
+
+                    if ($attachmentUrl) {
+                        DownloadInboundMediaJob::dispatch((string) $message->id)->afterCommit();
+                    }
 
                     $thread->update(['last_message_at' => now()]);
 

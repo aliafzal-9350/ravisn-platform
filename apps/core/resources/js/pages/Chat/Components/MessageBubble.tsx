@@ -71,24 +71,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
     // Toggle voice note playback
     const togglePlay = () => {
+        // No audio yet (still being copied from WhatsApp): nothing to play.
         if (!audioRef.current) {
-            // Simulated audio player when no real media_url is provided
-            if (isPlaying) {
-                setIsPlaying(false);
-            } else {
-                setIsPlaying(true);
-                let prog = playbackProgress;
-                const interval = setInterval(() => {
-                    prog += 4;
-                    if (prog >= 100) {
-                        setPlaybackProgress(0);
-                        setIsPlaying(false);
-                        clearInterval(interval);
-                    } else {
-                        setPlaybackProgress(prog);
-                    }
-                }, 100);
-            }
             return;
         }
 
@@ -199,6 +183,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                             : 'rounded-tr-sm bg-[#F0FDFA] dark:bg-teal-950/40 border-[#99F6E4] dark:border-teal-800/80 text-[#0F172A] dark:text-[#F8FAFC]'
                     }`}
                 >
+                    {!message.media_url && (isImage || isPdf || isAudio) && (
+                        <p className="mb-2 text-[11px] italic text-muted-foreground">
+                            {isAudio ? 'Voice note is being fetched…' : 'Attachment is being fetched…'}
+                        </p>
+                    )}
+
                     {/* A. Image Payload */}
                     {isImage && message.media_url && (
                         <div className="mb-2.5 overflow-hidden rounded-xl border border-slate-200/80 dark:border-slate-800 group relative">
@@ -293,6 +283,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                                 <button
                                     type="button"
                                     onClick={togglePlay}
+                                    disabled={!message.media_url}
+                                    aria-label={isPlaying ? 'Pause voice note' : 'Play voice note'}
                                     className={`w-9 h-9 rounded-full flex items-center justify-center text-white transition-transform active:scale-95 shadow-xs cursor-pointer shrink-0 ${
                                         isPlaying
                                             ? 'bg-emerald-700 dark:bg-emerald-600'
@@ -329,7 +321,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
                                 {/* Audio Duration Counter */}
                                 <span className="text-[11px] font-mono text-muted-foreground shrink-0 select-none">
-                                    {isPlaying ? currentTime : duration !== '0:00' ? duration : '0:42'}
+                                    {isPlaying ? currentTime : duration !== '0:00' ? duration : '--:--'}
                                 </span>
                             </div>
 

@@ -12,6 +12,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Client\DeveloperController;
 use App\Http\Controllers\Client\InboxController;
 use App\Http\Controllers\Client\KnowledgeController;
+use App\Http\Controllers\Client\MediaController;
 use App\Http\Controllers\Client\MessageTemplateController;
 use App\Http\Controllers\Client\SettingsController;
 use App\Http\Controllers\Client\SimulatorController;
@@ -93,6 +94,9 @@ Route::middleware(['auth', 'verified'])
 
             // Omni-channel Thread Human Takeover Toggle API
             Route::patch('threads/{thread}/takeover', [CrmChatController::class, 'toggleTakeover'])->name('threads.takeover');
+
+            // Customer media (our stored copy, tenant scoped)
+            Route::get('media/{message}', [MediaController::class, 'show'])->name('media.show');
 
             // Channel profile pictures (our stored copy, tenant scoped)
             Route::get('connect/{channel}/avatar', [ChannelController::class, 'avatar'])

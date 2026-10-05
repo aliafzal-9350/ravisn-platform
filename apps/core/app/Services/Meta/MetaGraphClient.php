@@ -191,6 +191,55 @@ class MetaGraphClient
     }
 
     /**
+     * Download a customer's media file.
+     *
+     * $source is a WhatsApp media id (resolved through the Graph API with the
+     * channel's token) or a Messenger/Instagram attachment link. Files larger
+     * than $maxBytes, and links outside Meta's CDN, are refused.
+     *
+     * @return array{body: string, mime: ?string}|null
+     */
+    public function downloadMedia(string $source, string $accessToken, int $maxBytes): ?array
+    {
+        $downloadUrl = $source;
+        $mime = null;
+
+        if (! str_starts_with($source, 'https://')) {
+            $meta = Http::withToken($accessToken)->timeout(15)->get("{$this->baseUrl}/{$source}");
+            if (! $meta->successful()) {
+                Log::warning('[MetaGraphClient] Media lookup failed', ['status' => $meta->status()]);
+
+                return null;
+            }
+            if ((int) $meta->json('file_size', 0) > $maxBytes) {
+                Log::info('[MetaGraphClient] Media larger than the download limit was skipped');
+
+                return null;
+            }
+            $downloadUrl = (string) $meta->json('url');
+            $mime = $meta->json('mime_type');
+        }
+
+        if (! MetaCdn::allows($downloadUrl)) {
+            Log::warning('[MetaGraphClient] Refused to download media from a non-Meta host');
+
+            return null;
+        }
+
+        $file = Http::withToken($accessToken)->timeout(60)->get($downloadUrl);
+        $body = $file->body();
+
+        if (! $file->successful() || $body === '' || strlen($body) > $maxBytes) {
+            return null;
+        }
+
+        return [
+            'body' => $body,
+            'mime' => $mime ?: (trim(explode(';', (string) $file->header('Content-Type'))[0]) ?: null),
+        ];
+    }
+
+    /**
      * Swap a short-lived Facebook Login token (about an hour) for a long-lived
      * one (about 60 days). Page tokens derived from a long-lived token do not
      * expire, so Messenger/Instagram keep working after the admin logs out.

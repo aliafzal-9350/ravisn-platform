@@ -134,7 +134,7 @@ class InboxController extends Controller
                             'direction' => $m->direction,
                             'message_type' => $m->message_type ?? 'text',
                             'content' => $m->content ?? '',
-                            'media_url' => $m->media_url,
+                            'media_url' => $m->mediaUrl(),
                             'media_mime_type' => $m->media_mime_type,
                             'whisper_transcript' => $whisperTranscript,
                             'status' => $m->status ?? 'sent',

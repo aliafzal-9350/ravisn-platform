@@ -203,6 +203,12 @@ export function triggerDesktopNotification(
     }
 }
 
+export interface RealtimeMediaReady {
+    message_id: string;
+    media_url: string;
+    media_mime_type: string | null;
+}
+
 /**
  * Subscribe to specific thread updates (active conversation stream).
  */
@@ -211,6 +217,7 @@ export function subscribeToThreadUpdates(
     onMessageCreated: (msg: RealtimeMessage) => void,
     onThreadUpdated: (thread: RealtimeThreadUpdate) => void,
     onStatusUpdated?: (status: RealtimeStatusUpdate) => void,
+    onMediaReady?: (media: RealtimeMediaReady) => void,
 ) {
     if (typeof window === 'undefined' || !threadId) {
         return () => {};
@@ -220,6 +227,16 @@ export function subscribeToThreadUpdates(
 
     if (echo) {
         const channel = echo.private(`chat.thread.${threadId}`);
+        // A customer's image / voice note / document finished copying to storage.
+        channel.listen('.MessageMediaReady', (data: any) => {
+            if (onMediaReady && data?.message_id) {
+                onMediaReady({
+                    message_id: data.message_id,
+                    media_url: data.media_url,
+                    media_mime_type: data.media_mime_type ?? null,
+                });
+            }
+        });
         channel.listen('.MessageCreated', (data: any) => {
             if (data.message) {
                 onMessageCreated(data.message);
