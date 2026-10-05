@@ -5,6 +5,7 @@ use App\Models\User;
 use App\Models\WhatsappAccount;
 use App\Models\WhatsappChat;
 use App\Jobs\PushInboundToAiJob;
+use App\Services\AI\AiJobQueue;
 use App\Models\Message;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Redis;
@@ -90,9 +91,9 @@ test('resume AI assistant toggles is_ai_active to true', function () {
 test('the AI stays silent for a workspace in pure manual mode', function () {
     $this->tenant->update(['ai_strategy' => 'pure_manual']);
 
-    $streamKey = 'test_inbound_ai_jobs';
-    config(['services.meta.inbound_ai_stream_key' => $streamKey]);
-    Redis::connection('bridge')->del($streamKey);
+    config(['services.meta.inbound_ai_stream' => 'test:ai:inbound']);
+    $queue = app(AiJobQueue::class);
+    $queue->clear();
 
     (new PushInboundToAiJob([
         'object' => 'whatsapp_business_account',
@@ -107,5 +108,5 @@ test('the AI stays silent for a workspace in pure manual mode', function () {
 
     // The message still reaches the inbox for a human, but no AI reply is queued.
     expect(Message::where('content', 'Hi, are you open today?')->exists())->toBeTrue()
-        ->and(Redis::connection('bridge')->llen($streamKey))->toBe(0);
+        ->and($queue->pending())->toBe([]);
 });

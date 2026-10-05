@@ -2,6 +2,7 @@ import logging
 from datetime import date
 from typing import Any, Dict, Optional
 from src.graph.state import AgentState
+from src.services.conversation_history import load_history
 from src.services.llm_factory import LLMFactory
 
 logger = logging.getLogger(__name__)
@@ -118,11 +119,16 @@ async def response_generator_node(state: AgentState) -> AgentState:
     ai_config = state.get("ai_config") or {}
     system_prompt = build_system_prompt(channel, rag_context, ai_config)
 
+    # Earlier turns, so follow-ups ("and for two people?") are understood.
+    history = await load_history(state.get("thread_id"), state.get("message_id"))
+    state["telemetry"]["history_turns"] = len(history)
+
     # Generate response via priority cascade
     result = await LLMFactory.generate_response(
         system_prompt=system_prompt,
         user_query=user_query,
-        temperature=_temperature(ai_config)
+        temperature=_temperature(ai_config),
+        history=history,
     )
 
     formatted_content = format_channel_response(result["content"], channel)

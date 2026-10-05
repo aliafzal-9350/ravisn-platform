@@ -5,6 +5,8 @@ class AgentState(TypedDict):
     # Owning tenant of the conversation; scopes knowledge retrieval.
     tenant_id: Optional[str]
     thread_id: str
+    # The inbound message being answered; excluded from the loaded history.
+    message_id: Optional[str]
     contact_id: str
     channel: str
     channel_identity_id: str

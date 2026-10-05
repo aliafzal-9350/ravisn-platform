@@ -45,7 +45,8 @@ return [
         // Disk for files copied from Meta (channel avatars, customer media).
         // "local" lives on the shared storage volume; any configured disk works.
         'media_disk' => env('MEDIA_DISK', 'local'),
-        'inbound_ai_stream_key' => env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'),
+        // Redis Stream of AI jobs for the agent worker (see AiJobQueue).
+        'inbound_ai_stream' => env('INBOUND_AI_STREAM', 'ai:inbound'),
         'crm_broadcast_channel' => env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates'),
     ],
 

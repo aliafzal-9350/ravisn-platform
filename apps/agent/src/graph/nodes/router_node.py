@@ -44,12 +44,10 @@ async def router_node(state: AgentState) -> AgentState:
     if any(pattern.search(text) for pattern in HUMAN_TRIGGER_PATTERNS):
         logger.info(f"[RouterNode] Human escalation / high frustration detected in message: '{text}'")
         state["intent"] = "human_escalation"
-        state["telemetry"]["confidence_score"] = 0.99
         return state
 
     if not text:
         state["intent"] = "general_inquiry"
-        state["telemetry"]["confidence_score"] = 0.80
         return state
 
     prompt = (
@@ -78,7 +76,6 @@ async def router_node(state: AgentState) -> AgentState:
             detected = resp.choices[0].message.content.strip().lower()
             if detected in VALID_INTENTS:
                 state["intent"] = detected
-                state["telemetry"]["confidence_score"] = 0.95
                 return state
         except Exception as e:
             logger.debug(f"[RouterNode] Groq classification fallback: {e}")
@@ -99,7 +96,6 @@ async def router_node(state: AgentState) -> AgentState:
                         detected = candidates[0]["content"]["parts"][0]["text"].strip().lower()
                         if detected in VALID_INTENTS:
                             state["intent"] = detected
-                            state["telemetry"]["confidence_score"] = 0.95
                             return state
         except Exception as e:
             logger.debug(f"[RouterNode] Gemini classification fallback: {e}")
@@ -118,11 +114,9 @@ async def router_node(state: AgentState) -> AgentState:
             detected = resp.choices[0].message.content.strip().lower()
             if detected in VALID_INTENTS:
                 state["intent"] = detected
-                state["telemetry"]["confidence_score"] = 0.95
                 return state
         except Exception as e:
             logger.debug(f"[RouterNode] OpenAI classification fallback: {e}")
 
     state["intent"] = "general_inquiry"
-    state["telemetry"]["confidence_score"] = 0.80
     return state

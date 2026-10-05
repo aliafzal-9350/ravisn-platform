@@ -33,6 +33,7 @@ async def execute_agent_pipeline(request: DirectAgentRequest) -> Dict[str, Any]:
     initial_state = {
         "tenant_id": request.tenant_id,
         "thread_id": request.thread_id,
+        "message_id": None,
         "contact_id": request.contact_id,
         "channel": request.channel,
         "channel_identity_id": request.channel_identity_id or "",

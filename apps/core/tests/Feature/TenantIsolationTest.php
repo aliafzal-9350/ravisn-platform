@@ -15,6 +15,7 @@ use App\Models\Tenant;
 use App\Models\Thread;
 use App\Models\User;
 use App\Models\WhatsappAccount;
+use App\Services\AI\AiJobQueue;
 use App\Services\Inbox\InboundChannelResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -425,9 +426,9 @@ test('deleting all knowledge only clears the tenant\'s own entries', function ()
 });
 
 test('the AI job names the tenant and never carries the channel access token', function () {
-    $streamKey = 'test_inbound_ai_jobs';
-    config(['services.meta.inbound_ai_stream_key' => $streamKey]);
-    Redis::connection('bridge')->del($streamKey);
+    config(['services.meta.inbound_ai_stream' => 'test:ai:inbound']);
+    $queue = app(AiJobQueue::class);
+    $queue->clear();
 
     (new PushInboundToAiJob([
         'object' => 'whatsapp_business_account',
@@ -440,15 +441,15 @@ test('the AI job names the tenant and never carries the channel access token', f
         ]]]],
     ]))->handle();
 
-    $jobs = Redis::connection('bridge')->lrange($streamKey, 0, -1);
-    Redis::connection('bridge')->del($streamKey);
+    $jobs = $queue->pending();
+    $queue->clear();
 
     expect($jobs)->toHaveCount(1);
-    $job = json_decode($jobs[0], true);
+    $job = $jobs[0];
 
     expect($job['tenant_id'])->toBe((string) $this->b->tenant->id)
         ->and($job)->not->toHaveKey('access_token')
-        ->and($jobs[0])->not->toContain('token-Bravo');
+        ->and(json_encode($job))->not->toContain('token-Bravo');
 });
 
 // ------------------------------------------------------------ dashboard isolation

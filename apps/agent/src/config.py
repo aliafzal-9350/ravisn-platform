@@ -20,9 +20,23 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = "redis://:SecureRedisPassword123!@redis:6379/0"
+    # Legacy Redis LIST of AI jobs; drained into the stream below on startup and
+    # while running, so jobs queued before an upgrade are not lost.
     INBOUND_AI_STREAM_KEY: str = "inbound_ai_jobs"
+    # Redis STREAM of AI jobs, read through a consumer group so a job is only
+    # removed once it has been handled (crash-safe), and retried otherwise.
+    INBOUND_AI_STREAM: str = "ai:inbound"
+    AI_WORKER_GROUP: str = "ai-workers"
     CRM_BROADCAST_CHANNEL: str = "crm_channel_updates"
+    # How many AI jobs one worker process handles at the same time.
     AGENT_WORKER_CONCURRENCY: int = 8
+    # A text message waits this long; if the customer sends more in the
+    # meantime, one reply answers the whole burst.
+    AI_DEBOUNCE_SECONDS: float = 3.0
+    # Attempts before a failing job is moved to the dead-letter stream.
+    AI_MAX_ATTEMPTS: int = 3
+    # A job held this long by a crashed worker is taken over by another.
+    AI_CLAIM_IDLE_MS: int = 300_000
 
     # Meta Graph API
     META_APP_ID: Optional[str] = None

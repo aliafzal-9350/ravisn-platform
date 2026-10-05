@@ -6,6 +6,10 @@ from src.config import settings
 logger = logging.getLogger(__name__)
 
 
+class MetaTransientError(Exception):
+    """Meta could not take the message right now (network, 5xx, rate limit); retry later."""
+
+
 class MetaGraphClient:
     def __init__(self):
         self.api_version = settings.META_API_VERSION
@@ -64,13 +68,18 @@ class MetaGraphClient:
 
             try:
                 response = await client.post(url, json=payload, headers=headers)
-                if response.status_code >= 400:
-                    logger.error(f"[MetaGraphClient] Error {response.status_code}: {response.text}")
-                    return {"error": response.text, "status_code": response.status_code}
-                return response.json()
-            except Exception as e:
-                logger.error(f"[MetaGraphClient] Request exception: {str(e)}")
-                return {"error": str(e)}
+            except httpx.HTTPError as e:
+                # Network trouble: worth retrying.
+                raise MetaTransientError(f"Request to Meta failed: {e}") from e
+
+            if response.status_code == 429 or response.status_code >= 500:
+                raise MetaTransientError(f"Meta returned {response.status_code}: {response.text[:300]}")
+            if response.status_code >= 400:
+                # Permanent for this message (bad token, closed 24h window...):
+                # report it instead of retrying.
+                logger.error(f"[MetaGraphClient] Error {response.status_code}: {response.text}")
+                return {"error": response.text, "status_code": response.status_code}
+            return response.json()
 
     async def fetch_media_bytes(self, media_id: str, access_token: str) -> Optional[bytes]:
         """Retrieve media buffer from Meta Graph API CDN."""

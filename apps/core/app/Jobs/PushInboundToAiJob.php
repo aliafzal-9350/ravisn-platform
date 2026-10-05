@@ -8,6 +8,7 @@ use App\Models\Contact;
 use App\Models\Message;
 use App\Models\Tenant;
 use App\Models\Thread;
+use App\Services\AI\AiJobQueue;
 use App\Services\Inbox\InboundChannelResolver;
 use App\Services\Meta\WebhookEventDeduplicator;
 use Illuminate\Bus\Queueable;
@@ -330,9 +331,8 @@ class PushInboundToAiJob implements ShouldQueue
                         'timestamp' => now()->toISOString(),
                     ]);
 
-                    $streamKey = config('services.meta.inbound_ai_stream_key', env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'));
-                    Redis::connection('bridge')->rpush($streamKey, $aiJobPayload);
-                    Log::info("[PushInboundToAiJob] Queued AI Task to Redis [{$streamKey}] for Thread {$thread->id}");
+                    app(AiJobQueue::class)->push($aiJobPayload);
+                    Log::info("[PushInboundToAiJob] Queued AI task for thread {$thread->id}");
                 }
             });
         }
@@ -342,7 +342,9 @@ class PushInboundToAiJob implements ShouldQueue
             $msgEvent = $entry['messaging'][0];
             $senderId = $msgEvent['sender']['id'] ?? null;
             $recipientId = $msgEvent['recipient']['id'] ?? null;
-            $channelType = isset($entry['id']) && str_starts_with($entry['id'], 'instagram') ? 'instagram' : 'messenger';
+            // Meta labels the delivery itself: object "instagram" or "page".
+            // (entry.id is a numeric account id, so it cannot tell them apart.)
+            $channelType = ($this->payload['object'] ?? null) === 'instagram' ? 'instagram' : 'messenger';
 
             $channel = app(InboundChannelResolver::class)->resolve($channelType, $recipientId);
             if (! $channel) {
@@ -507,8 +509,7 @@ class PushInboundToAiJob implements ShouldQueue
                             'timestamp' => now()->toISOString(),
                         ]);
 
-                        $streamKey = config('services.meta.inbound_ai_stream_key', env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'));
-                        Redis::connection('bridge')->rpush($streamKey, $aiJobPayload);
+                        app(AiJobQueue::class)->push($aiJobPayload);
                     }
                 });
             }
