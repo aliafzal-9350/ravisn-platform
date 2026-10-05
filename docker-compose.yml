@@ -97,6 +97,13 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Laravel's /up route boots the framework, so this catches a broken deploy.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     mem_limit: 800m
 
   # ----------------------------------------------------------------------------
@@ -152,6 +159,13 @@ services:
     <<: *agent-service
     container_name: ravisn-agent
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
+    # Checks the API plus its database and Redis connections.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     mem_limit: 800m
 
   # ----------------------------------------------------------------------------

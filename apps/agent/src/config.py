@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # The agent is internal-only, so no browser origin is allowed by default.
     CORS_ORIGINS: str = ""
 
+    # Error tracking (Sentry); leave empty to disable.
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
+
     @property
     def is_production(self) -> bool:
         return self.APP_ENV.lower() == "production"

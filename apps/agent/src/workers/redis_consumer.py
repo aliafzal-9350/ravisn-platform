@@ -31,6 +31,7 @@ from src.db.models import ChannelIdentity, Message, Thread
 from src.db.session import async_session_factory
 from src.graph.graph import compiled_agent_graph
 from src.services.laravel_crypt import decrypt_or_none
+from src.observability import init_error_tracking
 from src.services.meta_client import MetaGraphClient, MetaTransientError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -477,6 +478,7 @@ class InboundWorker:
 
 
 async def run_inbound_worker():
+    init_error_tracking("agent-worker")
     redis_client = Redis.from_url(settings.REDIS_URL, decode_responses=True)
     meta_client = MetaGraphClient()
     worker = InboundWorker(redis_client, lambda job: process_job(job, redis_client, meta_client))

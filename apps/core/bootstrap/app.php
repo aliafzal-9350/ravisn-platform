@@ -12,6 +12,7 @@ use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Inertia\Inertia;
+use Sentry\Laravel\Integration as Sentry;
 use Symfony\Component\HttpFoundation\Response;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -51,6 +52,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToPriorityList(before: SubstituteBindings::class, prepend: EnsureUserHasRole::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Report errors to Sentry when SENTRY_DSN is set (no-op otherwise).
+        Sentry::handles($exceptions);
+
         // Browser visits that hit a role restriction get a proper page instead of a bare error.
         $exceptions->respond(function (Response $response, Throwable $e, Request $request) {
             if ($response->getStatusCode() !== 403 || ($request->expectsJson() && ! $request->header('X-Inertia'))) {

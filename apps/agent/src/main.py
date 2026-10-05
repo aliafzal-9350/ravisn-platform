@@ -8,9 +8,12 @@ from src.config import settings
 from src.db.session import async_engine
 from src.api.v1 import health, agent, knowledge
 from src.api.deps import require_internal_token
+from src.observability import init_error_tracking
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("fastapi_agent")
+
+init_error_tracking("agent-api")
 
 
 @asynccontextmanager

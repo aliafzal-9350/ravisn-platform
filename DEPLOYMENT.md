@@ -109,7 +109,19 @@ it with an explicit, reviewed migration, before switching Laravel runtime traffi
 
 ---
 
-## 5. Scaling
+## 5. Monitoring
+
+1. **Errors:** create a free project at sentry.io and set `SENTRY_DSN` in `.env`. Laravel, the
+   agent API and the AI worker all report to it. Customer message content and personal data are
+   never sent.
+2. **Uptime:** add a free monitor (UptimeRobot or Better Stack) for `https://<domain>/up`, with
+   email/WhatsApp alerts. `core` and `agent` also have Docker healthchecks (`docker compose ps`).
+3. **AI jobs that failed 3 times** go to the Redis stream `ai:inbound:dead`. Check it with
+   `docker compose exec redis redis-cli -a "$REDIS_PASSWORD" XRANGE ai:inbound:dead - +`.
+
+---
+
+## 6. Scaling
 
 ```bash
 docker compose up -d --scale core-worker=4 --scale agent-worker=2
