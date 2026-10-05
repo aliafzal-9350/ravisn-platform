@@ -82,7 +82,8 @@ class LLMFactory:
         if settings.GEMINI_API_KEY:
             try:
                 model_name = settings.GEMINI_CHAT_MODEL
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.GEMINI_API_KEY}"
+                # The key travels in a header, never in the URL: request URLs are logged.
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
                 payload = {
                     "contents": cls.gemini_contents(system_prompt, user_query, history),
                     "generationConfig": {
@@ -91,7 +92,7 @@ class LLMFactory:
                     }
                 }
                 async with httpx.AsyncClient(timeout=12.0) as http_client:
-                    resp = await http_client.post(url, json=payload)
+                    resp = await http_client.post(url, json=payload, headers={"x-goog-api-key": settings.GEMINI_API_KEY})
                     if resp.status_code == 200:
                         data = resp.json()
                         candidates = data.get("candidates", [])

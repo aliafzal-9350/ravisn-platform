@@ -9,8 +9,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY requirements.txt constraints.txt ./
+# constraints.txt pins the exact versions the test suite passed with.
+RUN pip install --no-cache-dir --user -r requirements.txt -c constraints.txt
 
 # Final runtime image
 FROM python:3.11-slim

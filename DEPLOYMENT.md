@@ -109,6 +109,16 @@ it with an explicit, reviewed migration, before switching Laravel runtime traffi
 
 ---
 
+## 4b. Free database backups
+
+Supabase only offers backups on paid plans. `scripts/backup-db.ps1` (Windows) runs `pg_dump` in a
+throwaway Postgres 17 container and writes `../ravisn-backups/ravisn-<date>.sql.gz`, outside the
+project so it can never be committed. Run it before every migration (`scripts\dev.ps1 migrate`
+does this automatically) and copy the file somewhere safe, e.g. Google Drive.
+Restore with: `gunzip -c file.sql.gz | psql "<DATABASE_URL>"`.
+
+---
+
 ## 5. Monitoring
 
 1. **Errors:** create a free project at sentry.io and set `SENTRY_DSN` in `.env`. Laravel, the

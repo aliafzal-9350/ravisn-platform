@@ -83,13 +83,14 @@ async def router_node(state: AgentState) -> AgentState:
     # 3. Try Gemini
     if settings.GEMINI_API_KEY:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_CHAT_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
+            # The key travels in a header, never in the URL: request URLs are logged.
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.GEMINI_CHAT_MODEL}:generateContent"
             payload = {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.0, "maxOutputTokens": 10}
             }
             async with httpx.AsyncClient(timeout=5.0) as http_client:
-                resp = await http_client.post(url, json=payload)
+                resp = await http_client.post(url, json=payload, headers={"x-goog-api-key": settings.GEMINI_API_KEY})
                 if resp.status_code == 200:
                     candidates = resp.json().get("candidates", [])
                     if candidates:

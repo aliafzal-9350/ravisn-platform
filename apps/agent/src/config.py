@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "Ravisn Multi-Agent AI Platform"
     APP_ENV: str = "production"
     DEBUG: bool = False
+    # Print every SQL statement with its values (contains customer data); local debugging only.
+    SQL_ECHO: bool = False
 
     # Database URLs
     DATABASE_URL: str = "postgresql://ravisn_user:SecureProductionPassword123!@postgres:5432/ravisn_db"
