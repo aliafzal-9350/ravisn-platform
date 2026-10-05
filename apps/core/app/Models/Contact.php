@@ -76,9 +76,14 @@ class Contact extends Model
         return $value ?? ($this->custom_attributes['industry'] ?? null);
     }
 
+    /**
+     * Stage of a contact nobody has qualified yet. Never assume more than that.
+     */
+    public const DEFAULT_LEAD_STAGE = 'New Lead';
+
     public function getLeadStageAttribute($value): ?string
     {
-        return $value ?? ($this->custom_attributes['lead_stage'] ?? 'Enterprise Lead (High Priority)');
+        return $value ?? ($this->custom_attributes['lead_stage'] ?? self::DEFAULT_LEAD_STAGE);
     }
 
     public function getFullNameAttribute(): string
