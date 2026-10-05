@@ -140,12 +140,9 @@ export default function Login({ status, canResetPassword }: Props) {
                         </Button>
                     </div>
 
-                    <div className="text-center text-xs text-muted-foreground mt-2">
-                        Don't have an account?{' '}
-                        <TextLink href="/register" tabIndex={5} className="font-semibold text-emerald-600 hover:text-emerald-700">
-                            Sign up
-                        </TextLink>
-                    </div>
+                    <p className="text-center text-xs text-muted-foreground mt-2">
+                        Accounts are by invitation. Ask your workspace administrator for an invite.
+                    </p>
                 </form>
 
                 {status && (

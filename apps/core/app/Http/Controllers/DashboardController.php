@@ -26,19 +26,9 @@ class DashboardController extends Controller
     {
         $user = Auth::user();
 
-        // Auto-provision workspace for legacy users without one
-        if ($user && ! $user->tenant_id) {
-            $tenant = \App\Models\Tenant::create([
-                'name' => "{$user->name} Workspace",
-                'email' => $user->email,
-                'status' => 'active',
-            ]);
-            $user->update([
-                'tenant_id' => $tenant->id,
-                'role' => \App\Models\User::ROLE_ADMIN,
-            ]);
-            $user->refresh();
-        }
+        // Workspaces are created by RAVISN and joined by invitation; an account
+        // without one is never given a fresh workspace (and AI budget) here.
+        abort_if(! $user->tenant_id, 403, 'Your account is not attached to a workspace yet. Ask your RAVISN administrator for an invitation.');
 
         // Agents work from the inbox; the analytics dashboard is an admin surface.
         if ($user->isAgent()) {
