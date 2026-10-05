@@ -2,19 +2,19 @@
 
 namespace App\Services\WhatsApp;
 
+use App\Events\MessageStatusUpdatedEvent;
 use App\Jobs\SendOutgoingWebhook;
 use App\Models\CampaignRecipient;
 use App\Models\Contact;
+use App\Models\Message;
 use App\Models\SystemNotification;
 use App\Models\Tenant;
 use App\Models\WhatsappAccount;
-use App\Models\WhatsappChat;
 use App\Models\WhatsappMessage;
-use App\Services\AI\RavisnAiService;
+use App\Services\Automation\ConditionEvaluator;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Redis;
 
 class WebhookHandler
 {
@@ -158,7 +158,8 @@ class WebhookHandler
 
         $account = WhatsappAccount::where('phone_number_id', $phoneNumberId)->first();
         if (! $account) {
-            \Illuminate\Support\Facades\Log::warning('Webhook received for unknown phone_number_id', ['phone_number_id' => $phoneNumberId]);
+            Log::warning('Webhook received for unknown phone_number_id', ['phone_number_id' => $phoneNumberId]);
+
             return;
         }
 
@@ -234,21 +235,46 @@ class WebhookHandler
 
             $chat->update(['last_message_at' => now()]);
 
-            // Auto Opt-Out (STOP / UNSUBSCRIBE) to safeguard Quality Rating
-            $cleanBody = trim(strtolower($body));
-            if (in_array($cleanBody, ['stop', 'unsubscribe', 'cancel', 'optout', 'opt-out'])) {
-                \App\Models\Contact::where('tenant_id', $tenant->id)
+            // Update contact last_inbound_at
+            if ($contact) {
+                $contact->update(['last_inbound_at' => now()]);
+            } else {
+                Contact::where('tenant_id', $tenant->id)
                     ->where('phone', $customerPhone)
-                    ->update(['is_opted_out' => true]);
-                \Illuminate\Support\Facades\Log::info('Contact opted out via WhatsApp keyword', ['phone' => $customerPhone]);
+                    ->update(['last_inbound_at' => now()]);
             }
 
-            // Process Automation Flows
-            $this->processAutomationFlows($tenant, $customerPhone, $body, $account);
+            // Mandatory Opt-Out Logic: Regex check for ^(stop|unsubscribe|cancel)$ (case-insensitive)
+            $cleanBody = trim(strtolower($body));
+            $isOptOut = (bool) preg_match('/^(stop|unsubscribe|cancel)$/i', $cleanBody);
 
-            // Process RAVISN Master AI Automation Engine Directives
-            $aiService = app(RavisnAiService::class);
-            $aiService->processIncomingMessage($chat, $body);
+            if ($isOptOut) {
+                Contact::where('tenant_id', $tenant->id)
+                    ->where('phone', $customerPhone)
+                    ->update([
+                        'opted_out' => true,
+                        'last_inbound_at' => now(),
+                    ]);
+
+                // Dispatch internal system message to the thread
+                $chat->messages()->create([
+                    'meta_message_id' => 'sys_optout_'.bin2hex(random_bytes(8)),
+                    'direction' => 'outbound',
+                    'message_type' => 'text',
+                    'body' => 'Customer opted out',
+                    'sent_at' => now(),
+                    'status' => 'delivered',
+                ]);
+
+                $chat->update(['is_ai_active' => false]);
+                Log::info('Contact opted out via WhatsApp keyword', ['phone' => $customerPhone]);
+            }
+
+            if (! $isOptOut) {
+                // Process Automation Flows. AI replies are not sent from here:
+                // PushInboundToAiJob routes the message to the tenant's own agent.
+                $this->processAutomationFlows($tenant, $customerPhone, $body, $account);
+            }
 
             // Dispatch outgoing webhooks for the tenant if configured
             $activeWebhooks = $tenant->outgoingWebhooks()->where('is_active', true)->get();
@@ -306,20 +332,50 @@ class WebhookHandler
                 $this->updateRecipientStatus($recipient, $statusValue, $timestamp);
             }
 
-            // Update inbox/chat message status (covers inbox, API, and automation messages)
+            $newStatus = match ($statusValue) {
+                'sent' => 'sent',
+                'delivered' => 'delivered',
+                'read' => 'read',
+                'failed' => 'failed',
+                default => null,
+            };
+
+            // Update legacy WhatsappMessage
             $chatMessage = WhatsappMessage::where('meta_message_id', $messageId)->first();
+            if ($chatMessage && $newStatus) {
+                $chatMessage->update(['status' => $newStatus]);
+            }
 
-            if ($chatMessage) {
-                $newStatus = match ($statusValue) {
-                    'sent' => 'sent',
-                    'delivered' => 'delivered',
-                    'read' => 'read',
-                    'failed' => 'failed',
-                    default => null,
-                };
+            // Update Omnichannel Message model & broadcast read receipt
+            if ($newStatus) {
+                $omniMessage = Message::where('external_message_id', $messageId)->first();
+                if ($omniMessage) {
+                    $omniMessage->update(['status' => $newStatus]);
+                    $tenantId = $omniMessage->thread?->contact?->tenant_id ?? $omniMessage->contact?->tenant_id;
 
-                if ($newStatus) {
-                    $chatMessage->update(['status' => $newStatus]);
+                    // 1. Broadcast directly to Reverb
+                    MessageStatusUpdatedEvent::dispatch(
+                        (string) $omniMessage->id,
+                        (string) $omniMessage->thread_id,
+                        $newStatus,
+                        $tenantId ? (string) $tenantId : null
+                    );
+
+                    // 2. Publish to Redis Pub/Sub for worker sync
+                    try {
+                        Redis::connection('bridge')->publish(
+                            config('services.meta.crm_broadcast_channel', env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates')),
+                            json_encode([
+                                'event' => 'MessageStatusUpdated',
+                                'thread_id' => (string) $omniMessage->thread_id,
+                                'message_id' => (string) $omniMessage->id,
+                                'status' => $newStatus,
+                                'tenant_id' => $tenantId ? (string) $tenantId : null,
+                            ])
+                        );
+                    } catch (\Throwable $e) {
+                        Log::warning('[WebhookHandler] Redis status broadcast skipped: '.$e->getMessage());
+                    }
                 }
             }
         }
@@ -414,18 +470,6 @@ class WebhookHandler
             return;
         }
 
-        // Fetch contact details
-        $contact = $tenant->contacts()->where('phone', $customerPhone)->first();
-        $customerName = $contact ? $contact->name : $customerPhone;
-
-        $replaceVariables = function ($text) use ($customerName, $customerPhone, $messageText) {
-            return str_replace(
-                ['{{{senderName}}}', '{{{senderMobile}}}', '{{{senderMessage}}}'],
-                [$customerName, $customerPhone, $messageText],
-                $text ?? ''
-            );
-        };
-
         $flows = $tenant->automationFlows()->where('is_active', true)->get();
 
         foreach ($flows as $flow) {
@@ -447,219 +491,32 @@ class WebhookHandler
                 }
             }
 
-            $visualGraph = $flow->visual_graph;
-            $actions = $flow->actions ?? [];
-
-            if (is_array($visualGraph) && ! empty($visualGraph['nodes']) && ! empty($visualGraph['edges'])) {
-                // Execute using the structured visual graph traversal (supports branching, connection loops, multiple outputs)
-                $visited = [];
-                $this->executeGraphNode('start', $visualGraph, $actions, $tenant, $customerPhone, $messageText, $account, $replaceVariables, $visited);
-            } else {
-                // Fallback to sequential actions if no visual graph exists
-                $this->executeSequentialActions($actions, $tenant, $customerPhone, $messageText, $account, $replaceVariables);
-            }
-        }
-    }
-
-    protected function executeGraphNode(
-        string $nodeId,
-        array $visualGraph,
-        array $actions,
-        $tenant,
-        $customerPhone,
-        string $messageText,
-        $account,
-        callable $replaceVariables,
-        array &$visited
-    ): void {
-        if (isset($visited[$nodeId])) {
-            return;
-        }
-        $visited[$nodeId] = true;
-
-        $currentNode = null;
-        foreach ($visualGraph['nodes'] as $node) {
-            if (($node['id'] ?? '') === $nodeId) {
-                $currentNode = $node;
-                break;
-            }
-        }
-
-        if ($nodeId !== 'start' && $currentNode) {
-            $actionIndex = $currentNode['data']['actionIndex'] ?? null;
-            $conditionBranchIndex = null;
-
-            if ($actionIndex !== null && isset($actions[$actionIndex])) {
-                $action = $actions[$actionIndex];
-                if (($action['type'] ?? '') === 'condition') {
-                    $conditionOutcome = $this->automationConditionOutcome($action, $messageText);
-
-                    if (! $conditionOutcome['matched']) {
-                        return; // Stop traversal on this condition branch
-                    }
-
-                    $conditionBranchIndex = $conditionOutcome['branch_index'];
-                } else {
-                    $this->executeSingleAction($action, $tenant, $customerPhone, $messageText, $account, $replaceVariables);
-                }
-            }
-        }
-
-        // Find and traverse child nodes connected via edges
-        $childEdges = array_values(array_filter(
-            $visualGraph['edges'],
-            fn (array $edge): bool => ($edge['source'] ?? '') === $nodeId && ! empty($edge['target'])
-        ));
-
-        if (isset($conditionBranchIndex) && $conditionBranchIndex !== null) {
-            $childEdges = isset($childEdges[$conditionBranchIndex])
-                ? [$childEdges[$conditionBranchIndex]]
-                : [];
-        }
-
-        foreach ($childEdges as $edge) {
-            $this->executeGraphNode($edge['target'], $visualGraph, $actions, $tenant, $customerPhone, $messageText, $account, $replaceVariables, $visited);
-        }
-    }
-
-    protected function executeSequentialActions(array $actions, $tenant, $customerPhone, string $messageText, $account, callable $replaceVariables): void
-    {
-        foreach ($actions as $action) {
-            $actionType = $action['type'] ?? '';
-
-            if ($actionType === 'condition') {
-                $conditionOutcome = $this->automationConditionOutcome($action, $messageText);
-
-                if (! $conditionOutcome['matched']) {
-                    break;
-                }
-
-                continue;
-            }
-
-            $this->executeSingleAction($action, $tenant, $customerPhone, $messageText, $account, $replaceVariables);
-        }
-    }
-
-    protected function executeSingleAction($action, $tenant, $customerPhone, string $messageText, $account, callable $replaceVariables): void
-    {
-        $actionType = $action['type'] ?? '';
-
-        if ($actionType === 'send_message' && ! empty($action['text'])) {
-            try {
-                $processedText = $replaceVariables($action['text']);
-                $api = new WhatsAppCloudApi([
-                    'waba_id' => $account->waba_id,
-                    'phone_number_id' => $account->phone_number_id,
-                    'access_token' => $account->access_token,
-                ]);
-                $api->sendTextMessage($customerPhone, $processedText);
-
-                $chat = WhatsappChat::where('tenant_id', $tenant->id)
-                    ->where('customer_phone', $customerPhone)
-                    ->first();
-
-                if ($chat) {
-                    $chat->messages()->create([
-                        'meta_message_id' => 'auto_'.bin2hex(random_bytes(10)),
-                        'direction' => 'outbound',
-                        'message_type' => 'text',
-                        'body' => $processedText,
-                        'sent_at' => now(),
-                        'status' => 'sent',
-                    ]);
-                    $chat->update(['last_message_at' => now()]);
-                }
-            } catch (\Exception $e) {
-                \Log::error('Failed to send automation flow response: '.$e->getMessage());
-            }
-        } elseif ($actionType === 'add_to_group' && ! empty($action['group_id'])) {
-            $contact = $tenant->contacts()->firstOrCreate(
-                ['phone' => $customerPhone],
-                ['name' => $customerPhone]
-            );
-            $contact->groups()->syncWithoutDetaching([$action['group_id']]);
-        } elseif ($actionType === 'remove_from_group' && ! empty($action['group_id'])) {
-            $contact = $tenant->contacts()->where('phone', $customerPhone)->first();
-            if ($contact) {
-                $contact->groups()->detach([$action['group_id']]);
-            }
-        } elseif ($actionType === 'send_email') {
-            $emailTo = $replaceVariables($action['email_to'] ?? '');
-            $subject = $replaceVariables($action['subject'] ?? 'RAVISN Automation Alert');
-            $emailText = $replaceVariables($action['text'] ?? '');
-            if (! empty($emailTo)) {
-                try {
-                    Mail::raw($emailText, function ($message) use ($emailTo, $subject) {
-                        $message->to($emailTo)->subject($subject);
-                    });
-                } catch (\Exception $e) {
-                    \Log::error('Failed to send automation email: '.$e->getMessage());
-                }
-            }
-        } elseif ($actionType === 'http_request') {
-            $method = strtoupper($action['method'] ?? 'POST');
-            $url = $replaceVariables($action['url'] ?? '');
-            $bodyPayload = $replaceVariables($action['body'] ?? '');
-            if (! empty($url)) {
-                try {
-                    Http::withHeaders([
-                        'Content-Type' => 'application/json',
-                    ])->send($method, $url, [
-                        'body' => $bodyPayload,
-                    ]);
-                } catch (\Exception $e) {
-                    \Log::error('Automation HTTP Request failed: '.$e->getMessage());
-                }
-            }
-        } elseif ($actionType === 'google_sheets') {
-            // Google Sheets integration placeholder
-        } elseif ($actionType === 'assign_agent') {
-            $agentName = $action['agent_name'] ?? 'Agent';
-            $chat = WhatsappChat::where('tenant_id', $tenant->id)
-                ->where('customer_phone', $customerPhone)
-                ->first();
-            if ($chat) {
-                $chat->messages()->create([
-                    'meta_message_id' => 'system_'.bin2hex(random_bytes(10)),
-                    'direction' => 'outbound',
-                    'message_type' => 'text',
-                    'body' => '[System Action] Chat transferred to agent: '.$agentName,
-                    'sent_at' => now(),
-                    'status' => 'read',
-                ]);
-            }
-        } elseif ($actionType === 'save_response') {
-            $responseField = $action['response_field'] ?? 'notes';
-            $contact = $tenant->contacts()->firstOrCreate(
-                ['phone' => $customerPhone],
-                ['name' => $customerPhone]
-            );
-            $contact->update([
-                $responseField => $messageText,
+            // Durably log the trigger to a Redis Stream and return immediately —
+            // ConsumeAutomationTriggers picks it up and starts an async
+            // WorkflowEngine run (one queued job per node) instead of running
+            // the whole flow synchronously inside this webhook request.
+            Redis::xadd('automation_triggers', '*', [
+                'flow_id' => (string) $flow->id,
+                'tenant_id' => (string) $tenant->id,
+                'customer_phone' => $customerPhone,
+                'message_text' => $messageText,
+                'whatsapp_account_id' => (string) $account->id,
+                'triggered_at' => now()->toISOString(),
             ]);
-        } elseif ($actionType === 'delay') {
-            $delaySeconds = min((int) ($action['delay_seconds'] ?? 5), 10);
-            if ($delaySeconds > 0) {
-                sleep($delaySeconds);
-            }
         }
     }
 
     /**
      * Match conditions against incoming message text.
+     *
+     * Delegates to ConditionEvaluator, which the async WorkflowEngine/
+     * ExecuteWorkflowNodeJob pipeline also uses directly. Kept here as thin
+     * protected wrappers so existing tests that exercise these via an
+     * anonymous WebhookHandler subclass keep working unchanged.
      */
     protected function automationConditionMatches(array|string|null $action, string $messageText): bool
     {
-        if (is_array($action)) {
-            return $this->automationConditionOutcome($action, $messageText)['matched'];
-        }
-
-        if (is_string($action)) {
-            return $this->singleConditionMatches($action, $messageText);
-        }
-
-        return true;
+        return ConditionEvaluator::matches($action, $messageText);
     }
 
     /**
@@ -667,36 +524,7 @@ class WebhookHandler
      */
     protected function automationConditionOutcome(array $action, string $messageText): array
     {
-        $conditions = $action['conditions'] ?? null;
-        if (! is_array($conditions) || empty($conditions)) {
-            return [
-                'matched' => $this->singleConditionMatches($action['condition'] ?? null, $messageText),
-                'branch_index' => 0,
-            ];
-        }
-
-        $relation = strtoupper($action['conditions_relation'] ?? 'AND');
-
-        if ($relation === 'OR') {
-            foreach ($conditions as $conditionIndex => $cond) {
-                if ($this->singleConditionMatches($cond, $messageText)) {
-                    return [
-                        'matched' => true,
-                        'branch_index' => $conditionIndex,
-                    ];
-                }
-            }
-
-            return ['matched' => false, 'branch_index' => null];
-        } else {
-            foreach ($conditions as $cond) {
-                if (! $this->singleConditionMatches($cond, $messageText)) {
-                    return ['matched' => false, 'branch_index' => null];
-                }
-            }
-
-            return ['matched' => true, 'branch_index' => 0];
-        }
+        return ConditionEvaluator::outcome($action, $messageText);
     }
 
     /**
@@ -704,36 +532,6 @@ class WebhookHandler
      */
     protected function singleConditionMatches(array|string|null $cond, string $messageText): bool
     {
-        if (is_array($cond)) {
-            $operator = $cond['operator'] ?? 'contains';
-            $expected = trim((string) ($cond['value'] ?? ''), " \t\n\r\0\x0B\"'");
-
-            return match ($operator) {
-                'equals' => strcasecmp($messageText, $expected) === 0,
-                'starts_with' => str_starts_with(mb_strtolower($messageText), mb_strtolower($expected)),
-                'ends_with' => str_ends_with(mb_strtolower($messageText), mb_strtolower($expected)),
-                default => mb_stripos($messageText, $expected) !== false,
-            };
-        }
-
-        $condition = trim((string) $cond);
-
-        if ($condition === '') {
-            return true;
-        }
-
-        if (preg_match('/^(?:\{\{\{senderMessage\}\}\}|message)\s+(contains|equals|starts_with|ends_with)\s+(.+)$/i', $condition, $matches)) {
-            $operator = mb_strtolower($matches[1]);
-            $expected = trim($matches[2], " \t\n\r\0\x0B\"'");
-
-            return match ($operator) {
-                'equals' => strcasecmp($messageText, $expected) === 0,
-                'starts_with' => str_starts_with(mb_strtolower($messageText), mb_strtolower($expected)),
-                'ends_with' => str_ends_with(mb_strtolower($messageText), mb_strtolower($expected)),
-                default => mb_stripos($messageText, $expected) !== false,
-            };
-        }
-
-        return mb_stripos($messageText, $condition) !== false;
+        return ConditionEvaluator::singleMatches($cond, $messageText);
     }
 }

@@ -5,21 +5,34 @@ namespace App\Jobs;
 use App\Models\Campaign;
 use App\Models\CampaignRecipient;
 use App\Models\Contact;
+use App\Models\SystemNotification;
+use App\Models\WhatsappAccount;
 use App\Services\WhatsApp\WhatsAppCloudApi;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Redis;
 
 class SendCampaignMessage implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 3;
+    /**
+     * Waiting for a send slot or for Meta's rate limit to pass is not an error,
+     * so retries are bounded by time; genuine failures stop after three.
+     */
+    public int $maxExceptions = 3;
     public array $backoff = [5, 20, 60];
     public int $timeout = 30;
+
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addHours(6);
+    }
 
     public function __construct(
         public Campaign $campaign,
@@ -32,13 +45,16 @@ class SendCampaignMessage implements ShouldQueue
     {
         // 1. Skip if contact opted out
         $contact = Contact::where('tenant_id', $this->campaign->tenant_id)
-            ->where('phone', $this->recipient->phone_number)
+            ->where(function ($q) {
+                $q->where('phone', $this->recipient->phone_number)
+                    ->orWhere('phone_number', $this->recipient->phone_number);
+            })
             ->first();
 
-        if ($contact && ($contact->is_opted_out ?? false)) {
+        if ($contact && ($contact->opted_out || ($contact->is_opted_out ?? false))) {
             $this->recipient->update([
                 'status' => 'failed',
-                'error_message' => 'Contact previously opted out (STOP).',
+                'error_message' => 'Contact opted out.',
             ]);
             $this->campaign->increment('failed_count');
             $this->checkCampaignCompleted();
@@ -53,6 +69,14 @@ class SendCampaignMessage implements ShouldQueue
             ]);
             $this->campaign->increment('failed_count');
             $this->checkCampaignCompleted();
+            return;
+        }
+
+        // Stay under Meta's per-number throughput across every campaign and
+        // queue worker sending from this number.
+        if (! $this->acquireSendSlot($account)) {
+            $this->release(2);
+
             return;
         }
 
@@ -100,16 +124,9 @@ class SendCampaignMessage implements ShouldQueue
                     'error' => $e->getMessage(),
                 ]);
 
-                if ($this->attempts() < $this->tries) {
-                    $this->release(10);
-                    return;
-                }
+                $this->handleSendFailure($e);
 
-                $this->recipient->update([
-                    'status' => 'failed',
-                    'error_message' => $e->getMessage(),
-                ]);
-                $this->campaign->increment('failed_count');
+                return;
             }
 
             $this->checkCampaignCompleted();
@@ -280,19 +297,76 @@ class SendCampaignMessage implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
 
-            if ($this->attempts() < $this->tries) {
-                $this->release(10);
-                return;
-            }
+            $this->handleSendFailure($e);
 
+            return;
+        }
+
+        $this->checkCampaignCompleted();
+    }
+
+    /**
+     * Decide what a failed send means. The WhatsApp client throws on any error
+     * response, so Meta's answer is read from the exception:
+     * - rate limited (429 / 130429): wait and try again, it is not an error;
+     * - any other 4xx (invalid number, template mismatch): retrying cannot
+     *   help, so the recipient is marked failed now;
+     * - 5xx or network trouble: rethrown, retried with backoff, and recorded
+     *   by failed() once $maxExceptions is reached.
+     */
+    protected function handleSendFailure(\Throwable $e): void
+    {
+        $response = $e instanceof RequestException ? $e->response : null;
+
+        if ($response && ($response->status() === 429 || $response->json('error.code') === 130429)) {
+            $this->release(30);
+
+            return;
+        }
+
+        if ($response && $response->clientError()) {
             $this->recipient->update([
                 'status' => 'failed',
-                'error_message' => $e->getMessage(),
+                'error_message' => "Meta Error ({$response->status()}): ".$response->json('error.message', 'Unknown Meta Error'),
+            ]);
+            $this->campaign->increment('failed_count');
+            $this->checkCampaignCompleted();
+
+            return;
+        }
+
+        throw $e;
+    }
+
+    /**
+     * Out of retries (time or errors): record the recipient as failed so the
+     * campaign can still complete instead of waiting on it forever.
+     */
+    public function failed(?\Throwable $exception): void
+    {
+        $recipient = $this->recipient->fresh();
+
+        if ($recipient && $recipient->status === 'pending') {
+            $recipient->update([
+                'status' => 'failed',
+                'error_message' => $exception?->getMessage() ?: 'Could not be sent after several attempts.',
             ]);
             $this->campaign->increment('failed_count');
         }
 
         $this->checkCampaignCompleted();
+    }
+
+    /**
+     * Wait briefly for one of this number's per-second send slots.
+     */
+    protected function acquireSendSlot(WhatsappAccount $account): bool
+    {
+        return Redis::throttle('whatsapp-send:'.$account->id)
+            ->allow(max(1, (int) config('whatsapp.rate_limit.messages_per_second', 80)))
+            ->every(1)
+            ->block((int) config('whatsapp.rate_limit.slot_wait_seconds', 10))
+            ->then(fn () => true, fn () => false);
     }
 
     protected function checkCampaignCompleted(): void
@@ -304,9 +378,9 @@ class SendCampaignMessage implements ShouldQueue
             ]);
 
             if ($this->campaign->failed_count > 0 && $this->campaign->tenant_id) {
-                \App\Models\SystemNotification::create([
+                SystemNotification::create([
                     'tenant_id' => $this->campaign->tenant_id,
-                    'title' => 'فشل جزئي أو كلي في إرسال الحملة',
+                    'title' => 'Campaign finished with failed messages',
                     'message' => "Campaign '{$this->campaign->name}' finished with {$this->campaign->failed_count} failures.",
                     'type' => 'error',
                 ]);

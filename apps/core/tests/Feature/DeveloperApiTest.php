@@ -46,6 +46,13 @@ beforeEach(function () {
 });
 
 test('api send-text succeeds for the mock number +12125550198', function () {
+    \App\Models\Contact::create([
+        'tenant_id' => $this->tenant->id,
+        'phone' => '+12125550198',
+        'name' => 'Mock User',
+        'last_inbound_at' => now(),
+    ]);
+
     Http::fake([
         '*' => Http::response([
             'messaging_product' => 'whatsapp',

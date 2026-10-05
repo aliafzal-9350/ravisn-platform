@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Models\KnowledgeBase;
 use App\Models\KnowledgeChunk;
+use App\Models\Tenant;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -11,8 +12,17 @@ class KnowledgeBaseSeeder extends Seeder
 {
     public function run(): void
     {
+        // This is RAVISN's own agency content, so it belongs to the RAVISN
+        // workspace created by DatabaseSeeder, never to a client tenant.
+        $tenant = Tenant::where('email', 'admin@ravisn.com')->first();
+        if (! $tenant) {
+            $this->command?->warn('RAVISN workspace not found; skipping knowledge base seed.');
+
+            return;
+        }
+
         $kb = KnowledgeBase::firstOrCreate(
-            ['name' => 'RAVISN Enterprise Knowledge Base'],
+            ['tenant_id' => (string) $tenant->id, 'name' => 'RAVISN Enterprise Knowledge Base'],
             [
                 'description' => 'Unified RAG repository for company answers, products, services, and policies',
                 'embedding_model' => 'text-embedding-3-small',

@@ -31,11 +31,26 @@ interface MessageItem {
     provider?: string;
 }
 
+interface SimulatorTelemetry {
+    intent: string | null;
+    provider_route: string | null;
+    telemetry: {
+        inference_ms: number | null;
+        total_ms: number | null;
+        prompt_tokens: number | null;
+        completion_tokens: number | null;
+    };
+    lead_score: { score: number | null; category: string | null } | null;
+}
+
+/** Shown wherever the AI engine has not reported a value yet. */
+const NONE = '—';
+
+const GREETING = 'Send a message to test how your AI agent answers customers, using your knowledge base and Prompt Tuning settings.';
+
 interface SimulatorProps {
     initialConfig: {
         channel: string;
-        primary_model: string;
-        fallback_model: string;
         rag_enabled: boolean;
     };
     samplePrompts: string[];
@@ -47,30 +62,13 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
         {
             id: '1',
             role: 'assistant',
-            content: 'Hello! I am the RAVISN autonomous agent. How can I assist you with your customer outreach or inquiries today?',
+            content: GREETING,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            provider: 'Groq: LLaMA-3.3-70b',
         },
     ]);
     const [inputText, setInputText] = React.useState('');
     const [isLoading, setIsLoading] = React.useState(false);
-    const [lastTelemetry, setLastTelemetry] = React.useState<any>({
-        intent: 'general_inquiry',
-        intent_confidence: '98.8%',
-        provider_route: 'Groq: LLaMA-3.3-70b',
-        telemetry: {
-            retrieval_ms: 18.2,
-            inference_ms: 124.5,
-            total_ms: 142.7,
-            prompt_tokens: 210,
-            completion_tokens: 54,
-        },
-        lead_score_impact: {
-            delta: 5,
-            new_score: 55,
-            classification: 'Engaged',
-        },
-    });
+    const [lastTelemetry, setLastTelemetry] = React.useState<SimulatorTelemetry | null>(null);
 
     const messagesEndRef = React.useRef<HTMLDivElement>(null);
 
@@ -113,12 +111,13 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
                     role: 'assistant',
                     content: data.response,
                     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    provider: data.provider_route,
+                    provider: data.provider_route ?? undefined,
                 };
                 setMessages((prev) => [...prev, botMsg]);
                 setLastTelemetry(data);
             } else {
-                toast.error('Simulation execution error.');
+                const error = await res.json().catch(() => null);
+                toast.error(error?.message ?? 'The AI engine could not answer this message.');
             }
         } catch {
             toast.error('Failed to communicate with simulator service.');
@@ -132,11 +131,11 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
             {
                 id: '1',
                 role: 'assistant',
-                content: 'Hello! I am the RAVISN autonomous agent. How can I assist you with your customer outreach or inquiries today?',
+                content: GREETING,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                provider: 'Groq: LLaMA-3.3-70b',
             },
         ]);
+        setLastTelemetry(null);
         toast.info('Conversation history reset.');
     };
 
@@ -315,9 +314,6 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
                                         <Zap className="h-4 w-4" />
                                         <span>Intent & Route Selection</span>
                                     </div>
-                                    <Badge className="bg-emerald-600 text-white text-[10px]">
-                                        {lastTelemetry?.intent_confidence ?? '98.8%'}
-                                    </Badge>
                                 </div>
                                 <CardTitle className="text-sm font-bold text-foreground">
                                     Inferred Intent Classification
@@ -328,14 +324,14 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
                                 <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 p-2.5">
                                     <span className="text-muted-foreground font-medium">Detected Intent</span>
                                     <Badge variant="outline" className="font-mono text-[10px] uppercase font-bold text-foreground border-border">
-                                        {lastTelemetry?.intent?.replace('_', ' ') ?? 'General Inquiry'}
+                                        {lastTelemetry?.intent?.replace('_', ' ') ?? NONE}
                                     </Badge>
                                 </div>
 
                                 <div className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 p-2.5">
                                     <span className="text-muted-foreground font-medium">Active AI Provider</span>
                                     <span className="font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
-                                        {lastTelemetry?.provider_route ?? 'Groq: LLaMA-3.3-70b'}
+                                        {lastTelemetry?.provider_route ?? NONE}
                                     </span>
                                 </div>
                             </CardContent>
@@ -357,14 +353,14 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
                                 <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 flex flex-col">
                                     <span className="text-[10px] text-muted-foreground uppercase font-semibold">Total Turnaround</span>
                                     <span className="text-lg font-black text-foreground mt-0.5">
-                                        {lastTelemetry?.telemetry?.total_ms ?? 142} ms
+                                        {lastTelemetry?.telemetry?.total_ms != null ? `${lastTelemetry.telemetry.total_ms} ms` : NONE}
                                     </span>
                                 </div>
 
                                 <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 flex flex-col">
                                     <span className="text-[10px] text-muted-foreground uppercase font-semibold">Tokens (In / Out)</span>
                                     <span className="text-lg font-black text-foreground mt-0.5">
-                                        {lastTelemetry?.telemetry?.prompt_tokens ?? 210} / {lastTelemetry?.telemetry?.completion_tokens ?? 54}
+                                        {lastTelemetry?.telemetry?.prompt_tokens ?? NONE} / {lastTelemetry?.telemetry?.completion_tokens ?? NONE}
                                     </span>
                                 </div>
                             </CardContent>
@@ -384,23 +380,16 @@ export default function SimulatorIndex({ initialConfig, samplePrompts = [] }: Si
 
                             <CardContent className="flex flex-col gap-2.5 text-xs">
                                 <div className="flex items-center justify-between">
-                                    <span className="text-muted-foreground font-medium">Turn Score Delta</span>
-                                    <span className="font-black text-emerald-600 text-sm">
-                                        +{lastTelemetry?.lead_score_impact?.delta ?? 5} pts
-                                    </span>
-                                </div>
-
-                                <div className="flex items-center justify-between">
-                                    <span className="text-muted-foreground font-medium">Cumulative Score</span>
+                                    <span className="text-muted-foreground font-medium">Lead Score</span>
                                     <span className="font-bold text-foreground">
-                                        {lastTelemetry?.lead_score_impact?.new_score ?? 55} / 100
+                                        {lastTelemetry?.lead_score?.score != null ? `${lastTelemetry.lead_score.score} / 100` : NONE}
                                     </span>
                                 </div>
 
                                 <div className="flex items-center justify-between">
                                     <span className="text-muted-foreground font-medium">Classification</span>
-                                    <Badge className="bg-emerald-600 text-white text-[10px]">
-                                        {lastTelemetry?.lead_score_impact?.classification ?? 'Engaged'}
+                                    <Badge variant="outline" className="text-[10px] capitalize">
+                                        {lastTelemetry?.lead_score?.category ?? NONE}
                                     </Badge>
                                 </div>
                             </CardContent>

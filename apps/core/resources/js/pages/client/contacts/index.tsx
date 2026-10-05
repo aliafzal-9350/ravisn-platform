@@ -1,4 +1,4 @@
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import {
     Users,
     Plus,
@@ -85,6 +85,7 @@ export default function ContactsIndex({
     totalContactsCount,
     filters,
 }: ContactsIndexProps) {
+    const isAdmin = usePage<{ auth: { role?: string } }>().props.auth.role === 'admin';
     const [search, setSearch] = React.useState(filters.search || '');
     const [selectedGroupId, setSelectedGroupId] = React.useState<string>(
         filters.group_id || 'all',
@@ -489,14 +490,16 @@ export default function ContactsIndex({
                     >
                         <Edit2 className="h-4 w-4 text-zinc-500" />
                     </Button>
-                    <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 w-8 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/20"
-                        onClick={() => handleDeleteContact(row)}
-                    >
-                        <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {isAdmin && (
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-rose-600 hover:bg-rose-50 hover:text-rose-700 dark:hover:bg-rose-950/20"
+                            onClick={() => handleDeleteContact(row)}
+                        >
+                            <Trash2 className="h-4 w-4" />
+                        </Button>
+                    )}
                 </div>
             ),
         },
@@ -542,17 +545,19 @@ export default function ContactsIndex({
                                 <span className="text-xs font-bold tracking-wider text-zinc-400 uppercase dark:text-zinc-500">
                                     Contact Groups
                                 </span>
-                                <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-6 w-6 p-0 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
-                                    onClick={() => {
-                                        setEditingGroup(null);
-                                        setAddEditGroupOpen(true);
-                                    }}
-                                >
-                                    <Plus className="h-4 w-4" />
-                                </Button>
+                                {isAdmin && (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-6 w-6 p-0 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                                        onClick={() => {
+                                            setEditingGroup(null);
+                                            setAddEditGroupOpen(true);
+                                        }}
+                                    >
+                                        <Plus className="h-4 w-4" />
+                                    </Button>
+                                )}
                             </div>
 
                             <div className="flex max-h-[300px] flex-col gap-1 overflow-y-auto pr-1">
@@ -583,7 +588,7 @@ export default function ContactsIndex({
                                             </span>
 
                                             {/* Inline small actions displayed on hover */}
-                                            <div className="hidden items-center gap-0.5 rounded bg-zinc-100 p-0.5 shadow-sm group-hover:flex dark:bg-zinc-800">
+                                            <div className={`${isAdmin ? 'hidden group-hover:flex' : 'hidden'} items-center gap-0.5 rounded bg-zinc-100 p-0.5 shadow-sm dark:bg-zinc-800`}>
                                                 <button
                                                     className="p-1 hover:text-emerald-600"
                                                     onClick={(e) => {
@@ -639,7 +644,7 @@ export default function ContactsIndex({
                             </div>
 
                             <div className="flex flex-wrap gap-2 self-start sm:self-auto">
-                                {activeGroupDetails && (
+                                {isAdmin && activeGroupDetails && (
                                     <Button
                                         variant="outline"
                                         className="gap-1.5 border-emerald-500 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/20"
@@ -655,28 +660,32 @@ export default function ContactsIndex({
                                     </Button>
                                 )}
 
-                                <Button
-                                    variant="outline"
-                                    className="gap-1.5"
-                                    onClick={() =>
-                                        window.open(
-                                            '/dashboard/contacts/export',
-                                            '_blank',
-                                        )
-                                    }
-                                >
-                                    <Download className="h-4 w-4" />
-                                    <span>Export CSV</span>
-                                </Button>
+                                {isAdmin && (
+                                    <>
+                                        <Button
+                                            variant="outline"
+                                            className="gap-1.5"
+                                            onClick={() =>
+                                                window.open(
+                                                    '/dashboard/contacts/export',
+                                                    '_blank',
+                                                )
+                                            }
+                                        >
+                                            <Download className="h-4 w-4" />
+                                            <span>Export CSV</span>
+                                        </Button>
 
-                                <Button
-                                    variant="outline"
-                                    className="gap-1.5"
-                                    onClick={() => setImportOpen(true)}
-                                >
-                                    <Upload className="h-4 w-4" />
-                                    <span>Import CSV</span>
-                                </Button>
+                                        <Button
+                                            variant="outline"
+                                            className="gap-1.5"
+                                            onClick={() => setImportOpen(true)}
+                                        >
+                                            <Upload className="h-4 w-4" />
+                                            <span>Import CSV</span>
+                                        </Button>
+                                    </>
+                                )}
 
                                 <Button
                                     className="gap-2 bg-emerald-600 text-white hover:bg-emerald-700"

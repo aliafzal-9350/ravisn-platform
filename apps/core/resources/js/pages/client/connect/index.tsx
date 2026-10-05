@@ -26,6 +26,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { jsonHeaders } from '@/lib/csrf';
+import type { AccountChoice } from './ChooseAccountModal';
+import { ChooseAccountModal } from './ChooseAccountModal';
 import { DisconnectModal } from './DisconnectModal';
 import { ManualWabaModal } from './ManualWabaModal';
 import { WebhookTokenModal } from './WebhookTokenModal';
@@ -42,6 +45,7 @@ export interface WhatsAppChannelProps {
     quality_rating: string;
     messaging_limit: string;
     message_window: string;
+    profile_picture_url?: string;
     status: string;
     meta_api_version?: string;
 }
@@ -57,6 +61,7 @@ export interface InstagramChannelProps {
     permissions: string;
     auth_state: string;
     handover_mode: string;
+    profile_picture_url?: string;
     status: string;
 }
 
@@ -70,7 +75,56 @@ export interface MessengerChannelProps {
     subscribed_fields: string;
     messaging_state: string;
     response_rate: string;
+    profile_picture_url?: string;
     status: string;
+}
+
+interface ChannelAvatarProps {
+    src?: string;
+    alt: string;
+    fallbackIcon: React.ElementType;
+    fallbackBg: string;
+    fallbackText: string;
+    badgeBg?: string;
+    badgeIcon?: React.ElementType;
+}
+
+function ChannelAvatar({
+    src,
+    alt,
+    fallbackIcon: FallbackIcon,
+    fallbackBg,
+    fallbackText,
+    badgeBg,
+    badgeIcon: BadgeIcon,
+}: ChannelAvatarProps) {
+    const [imgFailed, setImgFailed] = React.useState(false);
+
+    if (src && !imgFailed) {
+        return (
+            <div className="relative h-11 w-11 shrink-0">
+                <img
+                    src={src}
+                    alt={alt}
+                    onError={() => setImgFailed(true)}
+                    className="h-11 w-11 rounded-xl object-cover border border-slate-200/90 dark:border-slate-700/80 shadow-2xs bg-slate-100 dark:bg-slate-800"
+                />
+                {BadgeIcon && (
+                    <div
+                        className={`absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full text-white ring-2 ring-white dark:ring-slate-900 shadow-2xs ${badgeBg || 'bg-slate-700'}`}
+                    >
+                        <BadgeIcon className="h-2.5 w-2.5" />
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${fallbackBg} ${fallbackText}`}>
+            <FallbackIcon className="h-5 w-5" />
+        </div>
+    );
 }
 
 export interface WebhookConfigProps {
@@ -107,6 +161,13 @@ export default function ConnectChannels(props: ConnectProps) {
     const [syncing, setSyncing] = React.useState(false);
     const [syncingChannel, setSyncingChannel] = React.useState<'whatsapp' | 'instagram' | 'messenger' | null>(null);
     const [manualWabaOpen, setManualWabaOpen] = React.useState(false);
+    // Set when one Facebook login reaches several accounts and the admin must pick one.
+    const [accountChoice, setAccountChoice] = React.useState<{
+        channelType: 'whatsapp' | 'instagram' | 'messenger';
+        token: string;
+        message: string;
+        choices: AccountChoice[];
+    } | null>(null);
     const [webhookTokenOpen, setWebhookTokenOpen] = React.useState(false);
     const [pageRolesOpen, setPageRolesOpen] = React.useState(false);
     const [disconnectState, setDisconnectState] = React.useState<{
@@ -149,6 +210,38 @@ export default function ConnectChannels(props: ConnectProps) {
         document.body.appendChild(script);
     }, [whatsapp_app_id]);
 
+    // Send a Facebook Login token; the server connects the one account it can
+    // reach, or answers with the accounts to choose from.
+    const connectWithToken = async (
+        channelType: 'whatsapp' | 'instagram' | 'messenger',
+        token: string,
+        externalId?: string,
+    ) => {
+        setSyncingChannel(channelType);
+        try {
+            const res = await fetch(`/dashboard/connect/${channelType}/token`, {
+                method: 'POST',
+                headers: jsonHeaders(),
+                body: JSON.stringify({ access_token: token, external_id: externalId }),
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok) {
+                setAccountChoice(null);
+                toast.success(data.message ?? 'Channel connected.');
+                router.reload();
+            } else if (Array.isArray(data.choices) && data.choices.length > 1) {
+                setAccountChoice({ channelType, token, message: data.message, choices: data.choices });
+            } else {
+                toast.error(data.message ?? 'Meta did not allow this connection.');
+            }
+        } catch {
+            toast.error('Could not reach the server. Please try again.');
+        } finally {
+            setSyncingChannel(null);
+        }
+    };
+
     // Launch Meta OAuth
     const launchMetaOAuth = (channelType: 'whatsapp' | 'instagram' | 'messenger' = 'whatsapp') => {
         if (!(window as any).FB) {
@@ -167,18 +260,7 @@ export default function ConnectChannels(props: ConnectProps) {
         (window as any).FB.login(
             (response: any) => {
                 if (response.authResponse?.accessToken) {
-                    const token = response.authResponse.accessToken;
-                    setSyncingChannel(channelType);
-                    router.post(
-                        `/dashboard/connect/${channelType}/token`,
-                        { access_token: token },
-                        {
-                            onSuccess: () =>
-                                toast.success(`Connected ${channelType.toUpperCase()} via Meta OAuth`),
-                            onFinish: () =>
-                                setSyncingChannel(null),
-                        }
-                    );
+                    connectWithToken(channelType, response.authResponse.accessToken);
                 } else {
                     toast.error('Meta Login was cancelled or not authorized.');
                 }
@@ -289,14 +371,20 @@ export default function ConnectChannels(props: ConnectProps) {
                             {/* Card Header */}
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400">
-                                        <Smartphone className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                                    <ChannelAvatar
+                                        src={whatsapp.is_connected ? whatsapp.profile_picture_url : undefined}
+                                        alt={whatsapp.verified_name || whatsapp.display_name || 'WhatsApp Business'}
+                                        fallbackIcon={Smartphone}
+                                        fallbackBg="bg-emerald-100 dark:bg-emerald-950/60"
+                                        fallbackText="text-emerald-700 dark:text-emerald-400"
+                                        badgeBg="bg-[#027A48]"
+                                        badgeIcon={Smartphone}
+                                    />
+                                    <div className="min-w-0">
+                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                                             WhatsApp Business
                                         </h3>
-                                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                                             {whatsapp.is_connected
                                                 ? `${whatsapp.verified_name || whatsapp.display_name || 'WhatsApp Business'} • ${whatsapp.display_phone_number || whatsapp.phone_number || 'Connected'}`
                                                 : 'WhatsApp Business Cloud API · Disconnected'}
@@ -382,7 +470,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Quality Rating</span>
                                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                            {whatsapp.quality_rating || 'GREEN (High Quality)'}
+                                            {whatsapp.quality_rating || '—'}
                                         </span>
                                     </div>
 
@@ -390,7 +478,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Messaging Limit</span>
                                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                            {whatsapp.messaging_limit || '1k / 24 Hours'}
+                                            {whatsapp.messaging_limit || '—'}
                                         </span>
                                     </div>
 
@@ -398,7 +486,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Message Window</span>
                                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                            {whatsapp.message_window || 'Active (24h Standard)'}
+                                            {whatsapp.message_window || '—'}
                                         </span>
                                     </div>
                                 </div>
@@ -455,16 +543,22 @@ export default function ConnectChannels(props: ConnectProps) {
                             {/* Card Header */}
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-950/60 dark:text-fuchsia-400">
-                                        <Camera className="h-5 w-5 text-fuchsia-600 dark:text-fuchsia-400" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                                    <ChannelAvatar
+                                        src={instagram.is_connected ? instagram.profile_picture_url : undefined}
+                                        alt={instagram.username || 'Instagram Direct'}
+                                        fallbackIcon={Camera}
+                                        fallbackBg="bg-fuchsia-100 dark:bg-fuchsia-950/60"
+                                        fallbackText="text-fuchsia-600 dark:text-fuchsia-400"
+                                        badgeBg="bg-gradient-to-tr from-amber-500 via-rose-500 to-fuchsia-600"
+                                        badgeIcon={Camera}
+                                    />
+                                    <div className="min-w-0">
+                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                                             Instagram Direct
                                         </h3>
-                                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                                             {instagram.is_connected
-                                                ? `@${instagram.username || 'instagram_account'} • ${instagram.account_type || 'Professional Business'}`
+                                                ? `@${instagram.username || 'instagram_account'} • ${instagram.profile_name || instagram.account_type || 'Professional Account'}`
                                                 : 'Direct Messaging • Not Connected'}
                                         </p>
                                     </div>
@@ -492,6 +586,22 @@ export default function ConnectChannels(props: ConnectProps) {
                             {/* Key-Value Rows */}
                             {instagram.is_connected ? (
                                 <div className="mt-6 space-y-3.5 text-xs">
+                                    {/* Username */}
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-slate-500 dark:text-slate-400">Username</span>
+                                        <span className="font-semibold text-slate-900 dark:text-slate-100">
+                                            @{instagram.username || '—'}
+                                        </span>
+                                    </div>
+
+                                    {/* Profile Name */}
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-slate-500 dark:text-slate-400">Profile Name</span>
+                                        <span className="font-medium text-slate-900 dark:text-slate-100 truncate max-w-[180px]">
+                                            {instagram.profile_name || instagram.username || '—'}
+                                        </span>
+                                    </div>
+
                                     {/* IG Scoped ID */}
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">IG Scoped ID</span>
@@ -535,14 +645,6 @@ export default function ConnectChannels(props: ConnectProps) {
                                         <span className="text-slate-500 dark:text-slate-400">Permissions</span>
                                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
                                             {instagram.permissions || 'Direct Messaging & Story Replies'}
-                                        </span>
-                                    </div>
-
-                                    {/* Auth State */}
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-slate-500 dark:text-slate-400">Auth State</span>
-                                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                            {instagram.auth_state || 'Permanent System User'}
                                         </span>
                                     </div>
 
@@ -607,16 +709,22 @@ export default function ConnectChannels(props: ConnectProps) {
                             {/* Card Header */}
                             <div className="flex items-start justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400">
-                                        <MessageSquare className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                                    <ChannelAvatar
+                                        src={messenger.is_connected ? messenger.profile_picture_url : undefined}
+                                        alt={messenger.page_name || 'Facebook Messenger'}
+                                        fallbackIcon={MessageSquare}
+                                        fallbackBg="bg-blue-100 dark:bg-blue-950/60"
+                                        fallbackText="text-blue-600 dark:text-blue-400"
+                                        badgeBg="bg-[#1877F2]"
+                                        badgeIcon={MessageSquare}
+                                    />
+                                    <div className="min-w-0">
+                                        <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
                                             Facebook Messenger
                                         </h3>
-                                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                        <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                                             {messenger.is_connected
-                                                ? `${messenger.page_name || 'Facebook Page'} • ${messenger.category || 'Official Page'}`
+                                                ? `${messenger.page_name || 'Facebook Page'} • ${messenger.category || 'Messenger'}`
                                                 : 'Meta Page Messaging • Not Connected'}
                                         </p>
                                     </div>
@@ -678,7 +786,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Category</span>
                                         <span className="font-medium text-slate-900 dark:text-slate-100">
-                                            {messenger.category || 'Business Page'}
+                                            {messenger.category || '—'}
                                         </span>
                                     </div>
 
@@ -686,7 +794,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Subscribed Webhooks</span>
                                         <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                                            {messenger.subscribed_fields || 'messages, postbacks, reads'}
+                                            {messenger.subscribed_fields || '—'}
                                         </span>
                                     </div>
 
@@ -694,7 +802,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Messaging State</span>
                                         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                            {messenger.messaging_state || 'Online / Operational'}
+                                            {messenger.messaging_state || '—'}
                                         </span>
                                     </div>
 
@@ -702,7 +810,7 @@ export default function ConnectChannels(props: ConnectProps) {
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-500 dark:text-slate-400">Response Rate</span>
                                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300">
-                                            {messenger.response_rate || 'Instant (<1m)'}
+                                            {messenger.response_rate || '—'}
                                         </span>
                                     </div>
                                 </div>
@@ -788,6 +896,15 @@ export default function ConnectChannels(props: ConnectProps) {
             </div>
 
             {/* Modals & Dialogs */}
+            <ChooseAccountModal
+                open={accountChoice !== null}
+                message={accountChoice?.message ?? ''}
+                choices={accountChoice?.choices ?? []}
+                submitting={syncingChannel !== null}
+                onChoose={(id) => accountChoice && connectWithToken(accountChoice.channelType, accountChoice.token, id)}
+                onOpenChange={(open) => !open && setAccountChoice(null)}
+            />
+
             <ManualWabaModal
                 open={manualWabaOpen}
                 onOpenChange={setManualWabaOpen}

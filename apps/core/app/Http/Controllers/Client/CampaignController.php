@@ -177,11 +177,16 @@ class CampaignController extends Controller
         $recipientsList = [];
         if (! empty($validated['contact_group_id'])) {
             $group = $tenant->contactGroups()->findOrFail($validated['contact_group_id']);
-            $contacts = $group->contacts()->get();
+            $contacts = $group->contacts()
+                ->where(function ($q) {
+                    $q->where('opted_out', false)->orWhereNull('opted_out');
+                })
+                ->get();
+
             foreach ($contacts as $contact) {
                 // Pass the contact name and variables
                 $recipientsList[] = [
-                    'phone_number' => $contact->phone,
+                    'phone_number' => $contact->phone ?? $contact->phone_number,
                     'variables' => [
                         $contact->name,
                         $contact->var1 ?? '',
@@ -193,7 +198,18 @@ class CampaignController extends Controller
                 ];
             }
         } else {
-            $recipientsList = $validated['recipients'] ?? [];
+            $rawRecipients = $validated['recipients'] ?? [];
+            $optedOutPhones = $tenant->contacts()
+                ->where('opted_out', true)
+                ->pluck('phone')
+                ->merge($tenant->contacts()->where('opted_out', true)->pluck('phone_number'))
+                ->filter()
+                ->toArray();
+
+            $recipientsList = array_values(array_filter($rawRecipients, function ($r) use ($optedOutPhones) {
+                $phone = $r['phone_number'] ?? '';
+                return ! in_array($phone, $optedOutPhones);
+            }));
         }
 
         if (empty($recipientsList)) {

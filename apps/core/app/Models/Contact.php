@@ -26,6 +26,8 @@ class Contact extends Model
         'company_name',
         'industry',
         'lead_stage',
+        'opted_out',
+        'last_inbound_at',
         'notes',
         'internal_notes',
         'custom_attributes',
@@ -40,9 +42,23 @@ class Contact extends Model
     protected function casts(): array
     {
         return [
+            'opted_out' => 'boolean',
+            'last_inbound_at' => 'datetime',
             'custom_attributes' => 'array',
             'tags' => 'array',
         ];
+    }
+
+    public function getIsOptedOutAttribute(): bool
+    {
+        return (bool) ($this->opted_out ?? false);
+    }
+
+    public function scopeNotOptedOut($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('opted_out', false)->orWhereNull('opted_out');
+        });
     }
 
     public function getInternalNotesAttribute($value): ?string
@@ -60,9 +76,14 @@ class Contact extends Model
         return $value ?? ($this->custom_attributes['industry'] ?? null);
     }
 
+    /**
+     * Stage of a contact nobody has qualified yet. Never assume more than that.
+     */
+    public const DEFAULT_LEAD_STAGE = 'New Lead';
+
     public function getLeadStageAttribute($value): ?string
     {
-        return $value ?? ($this->custom_attributes['lead_stage'] ?? 'Enterprise Lead (High Priority)');
+        return $value ?? ($this->custom_attributes['lead_stage'] ?? self::DEFAULT_LEAD_STAGE);
     }
 
     public function getFullNameAttribute(): string

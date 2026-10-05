@@ -24,6 +24,7 @@ async def rag_retriever_node(state: AgentState) -> AgentState:
             chunks = await HybridRetrieverService.hybrid_search(
                 session=session,
                 query=query,
+                tenant_id=state.get("tenant_id"),
                 limit=3
             )
 
@@ -35,6 +36,20 @@ async def rag_retriever_node(state: AgentState) -> AgentState:
             if grade in ("HIGH", "MEDIUM") and chunks:
                 context_texts = [f"- {c['content']}" for c in chunks]
                 state["rag_context"] = "\n".join(context_texts)
+
+                # Record the top-cited chunk for the AI reasoning trace UI —
+                # this is otherwise discarded once rag_context is flattened
+                # into a plain string for the LLM prompt.
+                top = chunks[0]
+                top_metadata = top.get("metadata") or {}
+                state["telemetry"]["cited_chunk"] = {
+                    "id": top.get("id"),
+                    "title": top_metadata.get("title") or top_metadata.get("question") or top_metadata.get("source"),
+                    "snippet": (top.get("content") or "")[:240],
+                    "score": top.get("rerank_score", top.get("composite_score", top.get("vector_score"))),
+                    "source": top_metadata.get("source"),
+                }
+
                 logger.info(f"[RagRetrieverNode] CRAG Grade: {grade} (Score: {score:.2f}) | {len(chunks)} chunks utilized.")
             else:
                 # LOW context quality: Avoid hallucinations, do not inject noisy context

@@ -1,0 +1,61 @@
+# ==============================================================================
+# RAVISN Platform: Local Development Overlay
+# ==============================================================================
+# docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Mounts the source for live reload and publishes debug ports on 127.0.0.1 only,
+# so the database, Redis and the internal agent API are never exposed to the LAN.
+# Never use this overlay on a server.
+
+services:
+  core:
+    volumes:
+      - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
+    ports:
+      - "127.0.0.1:8000:80"
+
+  core-worker:
+    volumes:
+      - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
+
+  core-scheduler:
+    volumes:
+      - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
+
+  core-crm-listener:
+    volumes:
+      - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
+
+  core-automation-consumer:
+    volumes:
+      - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
+
+  core-reverb:
+    volumes:
+      - ./apps/core:/var/www/html
+      - ./apps/core/storage/app:/var/www/html/storage/app
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  agent:
+    volumes:
+      - ./apps/agent:/app
+    ports:
+      - "127.0.0.1:8001:8000"
+
+  agent-worker:
+    volumes:
+      - ./apps/agent:/app
+
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

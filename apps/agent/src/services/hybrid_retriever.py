@@ -1,6 +1,6 @@
 import re
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.db.models import KnowledgeChunk
@@ -23,20 +23,32 @@ class HybridRetrieverService:
         cls,
         session: AsyncSession,
         query: str,
+        tenant_id: Optional[str],
         limit: int = 5,
         vector_weight: float = 0.7,
         lexical_weight: float = 0.3
     ) -> List[Dict[str, Any]]:
-        """Executes combined dense and sparse retrieval across knowledge chunks."""
+        """Executes combined dense and sparse retrieval across one tenant's knowledge chunks.
+
+        Retrieval is always confined to ``tenant_id``. Without a tenant there is
+        no knowledge to search: returning nothing is safer than answering a
+        customer from another business's documents.
+        """
         cleaned_query = query.strip()
         if not cleaned_query:
             return []
 
+        if not tenant_id:
+            logger.warning("[HybridRetriever] No tenant_id supplied; skipping retrieval.")
+            return []
+
+        tenant_id = str(tenant_id)
+
         # 1. Dense Vector Search
-        vector_results = await cls._dense_vector_search(session, cleaned_query, limit=limit * 2)
+        vector_results = await cls._dense_vector_search(session, cleaned_query, tenant_id, limit=limit * 2)
 
         # 2. Sparse Lexical Search (PostgreSQL Full-Text Search)
-        lexical_results = await cls._sparse_lexical_search(session, cleaned_query, limit=limit * 2)
+        lexical_results = await cls._sparse_lexical_search(session, cleaned_query, tenant_id, limit=limit * 2)
 
         # 3. Reciprocal Rank Fusion & Candidate Merge
         merged_candidates = cls._merge_candidates(vector_results, lexical_results, vector_weight, lexical_weight)
@@ -47,7 +59,7 @@ class HybridRetrieverService:
         return reranked
 
     @classmethod
-    async def _dense_vector_search(cls, session: AsyncSession, query: str, limit: int = 6) -> List[Dict[str, Any]]:
+    async def _dense_vector_search(cls, session: AsyncSession, query: str, tenant_id: str, limit: int = 6) -> List[Dict[str, Any]]:
         embedding = await EmbeddingService.generate_embedding(query)
         if not embedding:
             return []
@@ -59,6 +71,7 @@ class HybridRetrieverService:
                 KnowledgeChunk.metadata_,
                 (1 - KnowledgeChunk.embedding.cosine_distance(embedding)).label("similarity")
             ).where(
+                KnowledgeChunk.tenant_id == tenant_id,
                 KnowledgeChunk.embedding.isnot(None)
             ).order_by(
                 KnowledgeChunk.embedding.cosine_distance(embedding)
@@ -80,7 +93,7 @@ class HybridRetrieverService:
             return []
 
     @classmethod
-    async def _sparse_lexical_search(cls, session: AsyncSession, query: str, limit: int = 6) -> List[Dict[str, Any]]:
+    async def _sparse_lexical_search(cls, session: AsyncSession, query: str, tenant_id: str, limit: int = 6) -> List[Dict[str, Any]]:
         try:
             # Clean words for tsquery
             words = re.findall(r'\w+', query)
@@ -92,12 +105,13 @@ class HybridRetrieverService:
                 SELECT id, content, metadata,
                        ts_rank_cd(to_tsvector('english', content), to_tsquery('english', :tsquery)) as rank_score
                 FROM knowledge_chunks
-                WHERE to_tsvector('english', content) @@ to_tsquery('english', :tsquery)
+                WHERE tenant_id = :tenant_id
+                  AND to_tsvector('english', content) @@ to_tsquery('english', :tsquery)
                 ORDER BY rank_score DESC
                 LIMIT :limit
             """)
 
-            result = await session.execute(sql, {"tsquery": tsquery_term, "limit": limit})
+            result = await session.execute(sql, {"tsquery": tsquery_term, "tenant_id": tenant_id, "limit": limit})
             rows = result.fetchall()
 
             return [

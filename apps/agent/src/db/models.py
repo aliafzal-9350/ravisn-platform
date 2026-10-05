@@ -27,6 +27,7 @@ class ChannelIdentity(Base):
     __tablename__ = "channel_identities"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
     channel_type: Mapped[str] = mapped_column(String(50), nullable=False)
     account_name: Mapped[str] = mapped_column(String(255), nullable=False)
     external_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
@@ -107,6 +108,8 @@ class KnowledgeBase(Base):
     __tablename__ = "knowledge_bases"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Owning tenant; every read and write is confined to it.
+    tenant_id: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     embedding_model: Mapped[str] = mapped_column(String(100), default="text-embedding-3-small")
@@ -122,6 +125,8 @@ class KnowledgeChunk(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     knowledge_base_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("knowledge_bases.id", ondelete="CASCADE"), nullable=False)
+    # Denormalised from the knowledge base so retrieval can filter without a join.
+    tenant_id: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
     embedding = mapped_column(Vector(1536), nullable=True)

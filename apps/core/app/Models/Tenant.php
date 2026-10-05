@@ -8,13 +8,23 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'email', 'status', 'meta_business_id', 'webhook_token', 'ai_strategy'])]
+#[Fillable(['name', 'email', 'status', 'meta_business_id', 'webhook_token', 'ai_strategy', 'settings'])]
 class Tenant extends Model
 {
     /** @use HasFactory<TenantFactory> */
     use HasFactory;
 
 
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'settings' => 'array',
+        ];
+    }
 
     protected static function booted(): void
     {
@@ -108,5 +118,34 @@ class Tenant extends Model
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    /**
+     * Whether the AI may answer customers at all. "Pure manual" (set on the
+     * Automations page) is the workspace-wide off switch: humans reply to
+     * everything.
+     */
+    public function aiRepliesEnabled(): bool
+    {
+        return $this->ai_strategy !== 'pure_manual';
+    }
+
+    /**
+     * The Prompt Tuning settings sent with every AI task, so the agent answers
+     * in this tenant's own voice.
+     *
+     * @return array<string, mixed>
+     */
+    public function aiConfig(): array
+    {
+        $settings = $this->settings ?? [];
+
+        return array_filter([
+            'system_prompt' => $settings['system_prompt'] ?? null,
+            'ai_tone' => $settings['ai_tone'] ?? null,
+            'prohibited_topics' => $settings['prohibited_topics'] ?? null,
+            'temperature' => $settings['temperature'] ?? null,
+            'company_name' => $this->name,
+        ], fn ($value) => $value !== null && $value !== '');
     }
 }

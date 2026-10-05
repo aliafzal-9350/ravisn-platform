@@ -20,6 +20,9 @@ if AGENT_ROOT not in sys.path:
     sys.path.insert(0, AGENT_ROOT)
 
 AGENT_API_URL = "http://localhost:8001/api/v1"
+# The agent API only serves Laravel: send the shared token and the owning tenant.
+AGENT_HEADERS = {"X-Internal-Token": os.environ.get("AGENT_INTERNAL_TOKEN", "")}
+TEST_TENANT_ID = os.environ.get("TEST_TENANT_ID", "1")
 CORE_API_URL = "http://localhost:8000/api/v1/webhooks/meta"
 
 
@@ -27,6 +30,7 @@ def test_1_knowledge_document_ingestion():
     """Test POST /api/v1/knowledge/documents chunking and indexing into pgvector."""
     print("\n--- Test 1: Knowledge Document Ingestion ---")
     doc_payload = {
+        "tenant_id": TEST_TENANT_ID,
         "title": "RAVISN Enterprise Pricing and Support SLA",
         "content": (
             "RAVISN Platform provides three enterprise tiers: Starter, Professional, and Enterprise Ultra. "
@@ -40,7 +44,7 @@ def test_1_knowledge_document_ingestion():
     }
 
     with httpx.Client(timeout=10.0) as client:
-        resp = client.post(f"{AGENT_API_URL}/knowledge/documents", json=doc_payload)
+        resp = client.post(f"{AGENT_API_URL}/knowledge/documents", json=doc_payload, headers=AGENT_HEADERS)
         print(f"Status Code: {resp.status_code}")
         print(f"Response: {resp.json()}")
 

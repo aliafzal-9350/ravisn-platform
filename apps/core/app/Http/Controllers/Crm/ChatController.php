@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Crm;
 
+use App\Events\ThreadUpdatedEvent;
 use App\Http\Controllers\Controller;
 use App\Models\Message;
 use App\Models\Thread;
@@ -9,6 +10,7 @@ use App\Services\Meta\MetaGraphClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -91,7 +93,7 @@ class ChatController extends Controller
 
         // Publish to Redis Pub/Sub for instant UI refresh
         try {
-            Redis::publish('crm_channel_updates', json_encode([
+            Redis::connection('bridge')->publish('crm_channel_updates', json_encode([
                 'event' => 'MessageCreated',
                 'thread_id' => (string) $thread->id,
                 'message_id' => (string) $message->id,
@@ -110,7 +112,9 @@ class ChatController extends Controller
      */
     public function toggleTakeover(Request $request, string $threadId): JsonResponse
     {
-        $thread = Thread::findOrFail($threadId);
+        abort_unless(Str::isUuid($threadId), 404);
+
+        $thread = Thread::forTenant($request->user()?->tenant_id)->findOrFail($threadId);
         $newBotState = ! $thread->bot_active;
 
         $thread->update([
@@ -118,16 +122,7 @@ class ChatController extends Controller
             'status' => $newBotState ? 'open' : 'human_takeover',
         ]);
 
-        try {
-            Redis::publish('crm_channel_updates', json_encode([
-                'event' => 'ThreadStatusChanged',
-                'thread_id' => (string) $thread->id,
-                'bot_active' => $newBotState,
-                'status' => $thread->status,
-            ]));
-        } catch (\Throwable $e) {
-            // Redis broadcast fallback
-        }
+        event(new ThreadUpdatedEvent($thread));
 
         return response()->json([
             'status' => 'success',

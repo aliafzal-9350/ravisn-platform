@@ -1,3 +1,4 @@
+import { jsonHeaders } from '@/lib/csrf';
 import * as React from 'react';
 import { toast } from 'sonner';
 import { User, X } from 'lucide-react';
@@ -21,7 +22,7 @@ export function CustomerDetailsPanel({
     const [email, setEmail] = React.useState('');
     const [companyName, setCompanyName] = React.useState('');
     const [industry, setIndustry] = React.useState('');
-    const [leadStage, setLeadStage] = React.useState('Enterprise Lead (High Priority)');
+    const [leadStage, setLeadStage] = React.useState('New Lead');
     const [internalNotes, setInternalNotes] = React.useState('');
     const [saving, setSaving] = React.useState(false);
 
@@ -33,7 +34,7 @@ export function CustomerDetailsPanel({
             setEmail(contact.email || '');
             setCompanyName(contact.company_name || '');
             setIndustry(contact.industry || '');
-            setLeadStage(contact.lead_stage || 'Enterprise Lead (High Priority)');
+            setLeadStage(contact.lead_stage || 'New Lead');
             setInternalNotes(contact.internal_notes || contact.notes || '');
         }
     }, [contact]);
@@ -45,7 +46,7 @@ export function CustomerDetailsPanel({
             setEmail(contact.email || '');
             setCompanyName(contact.company_name || '');
             setIndustry(contact.industry || '');
-            setLeadStage(contact.lead_stage || 'Enterprise Lead (High Priority)');
+            setLeadStage(contact.lead_stage || 'New Lead');
             setInternalNotes(contact.internal_notes || contact.notes || '');
             toast.info('Form changes reverted');
         }
@@ -59,10 +60,7 @@ export function CustomerDetailsPanel({
         try {
             const res = await fetch(`/api/v1/contacts/${contact.id}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Accept: 'application/json',
-                },
+                headers: jsonHeaders(),
                 body: JSON.stringify({
                     name,
                     phone_number: phoneNumber,
@@ -227,6 +225,7 @@ export function CustomerDetailsPanel({
                             onChange={(e) => setLeadStage(e.target.value)}
                             className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 font-semibold focus:outline-none focus:ring-1 focus:ring-emerald-500 appearance-none cursor-pointer"
                         >
+                            <option value="New Lead">New Lead</option>
                             <option value="Enterprise Lead (High Priority)">
                                 Enterprise Lead (High Priority)
                             </option>

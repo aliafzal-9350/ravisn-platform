@@ -42,7 +42,11 @@ return [
         'whatsapp_phone_id' => env('WHATSAPP_PHONE_NUMBER_ID'),
         'whatsapp_waba_id' => env('WHATSAPP_BUSINESS_ACCOUNT_ID'),
         'whatsapp_system_token' => env('WHATSAPP_SYSTEM_USER_ACCESS_TOKEN', env('META_ACCESS_TOKEN')),
-        'inbound_ai_stream_key' => env('INBOUND_AI_STREAM_KEY', 'inbound_ai_jobs'),
+        // Disk for files copied from Meta (channel avatars, customer media).
+        // "local" lives on the shared storage volume; any configured disk works.
+        'media_disk' => env('MEDIA_DISK', 'local'),
+        // Redis Stream of AI jobs for the agent worker (see AiJobQueue).
+        'inbound_ai_stream' => env('INBOUND_AI_STREAM', 'ai:inbound'),
         'crm_broadcast_channel' => env('CRM_BROADCAST_CHANNEL', 'crm_channel_updates'),
     ],
 
@@ -54,6 +58,13 @@ return [
 
     'gemini' => [
         'key' => env('GEMINI_API_KEY'),
+    ],
+
+    // Internal FastAPI agent. Only Laravel calls it, authenticated with the
+    // shared token (the agent's INTERNAL_API_TOKEN).
+    'agent' => [
+        'url' => env('AGENT_API_URL', 'http://agent:8000'),
+        'internal_token' => env('AGENT_INTERNAL_TOKEN'),
     ],
 
     'whatsapp' => [

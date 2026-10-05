@@ -22,6 +22,20 @@ use Inertia\Response;
 class InboxController extends Controller
 {
     /**
+     * Legacy WhatsappChat lookup, confined to the caller's tenant.
+     */
+    protected function tenantChat(Request $request, string $chatId): ?WhatsappChat
+    {
+        $tenantId = $request->user()?->tenant_id;
+
+        if ($tenantId === null) {
+            return null;
+        }
+
+        return WhatsappChat::where('tenant_id', (string) $tenantId)->find($chatId);
+    }
+
+    /**
      * Display the omnichannel inbox (React 19 + Inertia).
      */
     public function index(Request $request): Response|JsonResponse
@@ -34,9 +48,10 @@ class InboxController extends Controller
         }
 
         $tenant = $request->user()?->tenant;
+        $tenantId = $request->user()?->tenant_id;
 
         // Fetch threads eager-loading contact, channelIdentity, and latest message
-        $threadsQuery = Thread::with([
+        $threadsQuery = Thread::forTenant($tenantId)->with([
             'contact',
             'channelIdentity',
             'messages' => function ($q) {
@@ -75,7 +90,7 @@ class InboxController extends Controller
                     'email' => $contact->email,
                     'company_name' => $contact->company_name,
                     'industry' => $contact->industry,
-                    'lead_stage' => $contact->lead_stage ?? 'Enterprise Lead (High Priority)',
+                    'lead_stage' => $contact->lead_stage ?? \App\Models\Contact::DEFAULT_LEAD_STAGE,
                     'internal_notes' => $contact->internal_notes,
                     'notes' => $contact->notes,
                     'updated_at' => $contact->updated_at?->toISOString(),
@@ -96,24 +111,39 @@ class InboxController extends Controller
         // Fetch initial active thread messages if thread exists
         $initialThreadData = null;
         if ($selectedThreadId) {
-            $initialThread = Thread::with(['contact', 'channelIdentity'])->find($selectedThreadId);
+            $initialThread = Str::isUuid((string) $selectedThreadId)
+                ? Thread::forTenant($tenantId)->with(['contact', 'channelIdentity'])->find($selectedThreadId)
+                : null;
             if ($initialThread) {
                 $session = ApiChatController::computeSessionWindow($initialThread);
                 $messages = Message::where('thread_id', $initialThread->id)
                     ->orderBy('created_at', 'asc')
                     ->get()
-                    ->map(fn (Message $m) => [
-                        'id' => (string) $m->id,
-                        'thread_id' => (string) $m->thread_id,
-                        'direction' => $m->direction,
-                        'message_type' => $m->message_type ?? 'text',
-                        'content' => $m->content ?? '',
-                        'status' => $m->status ?? 'sent',
-                        'is_ai_generated' => (bool) $m->is_ai_generated,
-                        'created_at' => $m->created_at?->toISOString() ?? now()->toISOString(),
-                        'formatted_time' => $m->created_at ? $m->created_at->format('g:i A') : now()->format('g:i A'),
-                        'date_group' => $m->created_at && $m->created_at->isToday() ? 'TODAY' : ($m->created_at ? $m->created_at->format('M d, Y') : 'TODAY'),
-                    ]);
+                    ->map(function (Message $m) {
+                        $rawPayload = $m->raw_payload;
+                        $whisperTranscript = is_array($rawPayload)
+                            ? ($rawPayload['transcript'] ?? $rawPayload['whisper_transcript'] ?? null)
+                            : null;
+                        if (! $whisperTranscript && in_array($m->message_type, ['audio', 'voice'])) {
+                            $whisperTranscript = $m->content;
+                        }
+
+                        return [
+                            'id' => (string) $m->id,
+                            'thread_id' => (string) $m->thread_id,
+                            'direction' => $m->direction,
+                            'message_type' => $m->message_type ?? 'text',
+                            'content' => $m->content ?? '',
+                            'media_url' => $m->mediaUrl(),
+                            'media_mime_type' => $m->media_mime_type,
+                            'whisper_transcript' => $whisperTranscript,
+                            'status' => $m->status ?? 'sent',
+                            'is_ai_generated' => (bool) $m->is_ai_generated,
+                            'created_at' => $m->created_at?->toISOString() ?? now()->toISOString(),
+                            'formatted_time' => $m->created_at ? $m->created_at->format('g:i A') : now()->format('g:i A'),
+                            'date_group' => $m->created_at && $m->created_at->isToday() ? 'TODAY' : ($m->created_at ? $m->created_at->format('M d, Y') : 'TODAY'),
+                        ];
+                    });
 
                 $c = $initialThread->contact;
                 $initialThreadData = [
@@ -137,7 +167,7 @@ class InboxController extends Controller
                         'email' => $c->email,
                         'company_name' => $c->company_name,
                         'industry' => $c->industry,
-                        'lead_stage' => $c->lead_stage ?? 'Enterprise Lead (High Priority)',
+                        'lead_stage' => $c->lead_stage ?? \App\Models\Contact::DEFAULT_LEAD_STAGE,
                         'internal_notes' => $c->internal_notes,
                         'notes' => $c->notes,
                         'updated_at' => $c->updated_at?->toISOString(),
@@ -177,7 +207,7 @@ class InboxController extends Controller
             'initialThread' => $initialThreadData,
             'accounts' => $accounts,
             'templates' => $templates,
-            'openCount' => Thread::where(function ($q) {
+            'openCount' => Thread::forTenant($tenantId)->where(function ($q) {
                 $q->where('status', 'open')->orWhereNull('status');
             })->count(),
         ]);
@@ -188,14 +218,15 @@ class InboxController extends Controller
      */
     public function messages(Request $request, string $chatId): JsonResponse
     {
-        $thread = Str::isUuid($chatId) ? Thread::find($chatId) : null;
+        $tenantId = $request->user()?->tenant_id;
+        $thread = Str::isUuid($chatId) ? Thread::forTenant($tenantId)->find($chatId) : null;
         if ($thread) {
             $apiChatController = new ApiChatController();
-            return $apiChatController->showThread($chatId);
+            return $apiChatController->showThread($request, $chatId);
         }
 
         // Check fallback WhatsappChat
-        $waChat = WhatsappChat::find($chatId);
+        $waChat = $this->tenantChat($request, $chatId);
         if ($waChat) {
             $messages = $waChat->messages()
                 ->orderBy('created_at', 'asc')
@@ -231,7 +262,7 @@ class InboxController extends Controller
                     'email' => null,
                     'company_name' => null,
                     'industry' => null,
-                    'lead_stage' => 'Enterprise Lead (High Priority)',
+                    'lead_stage' => \App\Models\Contact::DEFAULT_LEAD_STAGE,
                     'internal_notes' => null,
                 ],
                 'messages' => $messages,
@@ -246,14 +277,14 @@ class InboxController extends Controller
      */
     public function sendMessage(Request $request, string $chatId, WhatsAppCloudApi $whatsAppApi): JsonResponse
     {
-        $thread = Str::isUuid($chatId) ? Thread::find($chatId) : null;
+        $thread = Str::isUuid($chatId) ? Thread::forTenant($request->user()?->tenant_id)->find($chatId) : null;
         if ($thread) {
             $apiChatController = new ApiChatController();
             return $apiChatController->sendMessage($request, $chatId);
         }
 
         // Fallback WhatsappChat send
-        $waChat = WhatsappChat::find($chatId);
+        $waChat = $this->tenantChat($request, $chatId);
         if ($waChat) {
             // Check 24-hour free-text session window
             $msgType = $request->input('type') ?? $request->input('message_type') ?? 'text';
@@ -326,10 +357,10 @@ class InboxController extends Controller
     {
         if (Str::isUuid($chatId)) {
             $apiChatController = new ApiChatController();
-            return $apiChatController->toggleBot($chatId);
+            return $apiChatController->toggleBot($request, $chatId);
         }
 
-        $waChat = WhatsappChat::find($chatId);
+        $waChat = $this->tenantChat($request, $chatId);
         if ($waChat) {
             $state = $request->has('is_ai_active')
                 ? (bool) $request->input('is_ai_active')

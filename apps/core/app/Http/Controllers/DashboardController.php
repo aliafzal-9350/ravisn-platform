@@ -8,6 +8,7 @@ use App\Models\Contact;
 use App\Models\Message;
 use App\Models\Thread;
 use Carbon\CarbonPeriod;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
@@ -21,67 +22,36 @@ class DashboardController extends Controller
     /**
      * Display the enterprise-grade dual-engine operational dashboard.
      */
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $user = Auth::user();
 
-        // Auto-provision workspace for legacy users without one
-        if ($user && ! $user->tenant_id) {
-            $tenant = \App\Models\Tenant::create([
-                'name' => "{$user->name} Workspace",
-                'email' => $user->email,
-                'status' => 'active',
-            ]);
-            $user->update([
-                'tenant_id' => $tenant->id,
-                'role' => 'client',
-            ]);
-            $user->refresh();
+        // Workspaces are created by RAVISN and joined by invitation; an account
+        // without one is never given a fresh workspace (and AI budget) here.
+        abort_if(! $user->tenant_id, 403, 'Your account is not attached to a workspace yet. Ask your RAVISN administrator for an invitation.');
+
+        // Agents work from the inbox; the analytics dashboard is an admin surface.
+        if ($user->isAgent()) {
+            return redirect()->route('client.inbox.index');
         }
 
-        $tenantId = $user->current_team_id ?? $user->tenant_id ?? $user->id;
+        // Every figure below is confined to this tenant. There is deliberately no
+        // fallback to global data: a new workspace must see zeros, never another
+        // tenant's numbers.
+        $tenantId = (string) $user->tenant_id;
 
         // 1. Multi-Tenant Channel Connections
-        $channelsQuery = ChannelIdentity::query();
-        if (Schema::hasColumn('channel_identities', 'tenant_id')) {
-            $channelsQuery->where('tenant_id', $tenantId);
-        }
-        $channels = $channelsQuery->get();
+        $channels = ChannelIdentity::forTenant($tenantId)->get();
 
         $whatsappChannel = $channels->first(fn ($c) => ($c->channel ?? $c->channel_type) === 'whatsapp');
         $instagramChannel = $channels->first(fn ($c) => ($c->channel ?? $c->channel_type) === 'instagram');
         $messengerChannel = $channels->first(fn ($c) => ($c->channel ?? $c->channel_type) === 'messenger');
 
-        $campaignsCount = Campaign::where('tenant_id', (string) $tenantId)->count();
-        if ($campaignsCount === 0) {
-            $campaignsCount = Campaign::count();
-        }
+        $campaignsCount = Campaign::where('tenant_id', $tenantId)->count();
 
-        // Scope messages & threads to tenant contacts
-        $tenantContactIds = Contact::where('tenant_id', $tenantId)->pluck('id');
-        $hasContactScope = $tenantContactIds->isNotEmpty();
-
-        $messagesQuery = function () use ($tenantId, $tenantContactIds, $hasContactScope) {
-            $q = Message::query();
-            if (Schema::hasColumn('messages', 'tenant_id')) {
-                return $q->where('tenant_id', $tenantId);
-            }
-            if ($hasContactScope) {
-                return $q->whereIn('contact_id', $tenantContactIds);
-            }
-            return $q;
-        };
-
-        $threadsQuery = function () use ($tenantId, $tenantContactIds, $hasContactScope) {
-            $q = Thread::query();
-            if (Schema::hasColumn('threads', 'tenant_id')) {
-                return $q->where('tenant_id', $tenantId);
-            }
-            if ($hasContactScope) {
-                return $q->whereIn('contact_id', $tenantContactIds);
-            }
-            return $q;
-        };
+        // Threads belong to a tenant through their channel; messages through their thread.
+        $threadsQuery = fn () => Thread::forTenant($tenantId);
+        $messagesQuery = fn () => Message::whereIn('thread_id', Thread::forTenant($tenantId)->select('threads.id'));
 
         // 2. Meta WABA Safeguards & Health
         $rolling24hStart = Carbon::now()->subHours(24);
@@ -93,10 +63,14 @@ class DashboardController extends Controller
         $tierLimit = $whatsappChannel?->meta_tier_limit ?? 100000;
         $consumptionPercent = $tierLimit > 0 ? round(($dailySent24h / $tierLimit) * 100, 2) : 0;
 
-        // 3. Meta API Usage & Category Cost (USD)
-        $hasCategoryCol = Schema::hasColumn('messages', 'category') && Schema::hasColumn('messages', 'cost_usd');
+        // 3. Meta API Usage & Category Cost (USD), only when messages record their
+        // Meta pricing category. Without it the split and spend are unknown, and
+        // the dashboard says so instead of estimating.
+        $costTracked = Schema::hasColumn('messages', 'category') && Schema::hasColumn('messages', 'cost_usd');
+        $marketingCount = $marketingCost = $authCount = $authCost = null;
+        $utilityCount = $utilityCost = $serviceCount = $totalCostUsd = null;
 
-        if ($hasCategoryCol) {
+        if ($costTracked) {
             $categoryBreakdown = $messagesQuery()
                 ->select('category', DB::raw('count(*) as count'), DB::raw('sum(cost_usd) as total_cost'))
                 ->groupBy('category')
@@ -111,19 +85,6 @@ class DashboardController extends Controller
             $utilityCost = (float) ($categoryBreakdown->get('utility')?->total_cost ?? 0.00);
             $serviceCount = (int) ($categoryBreakdown->get('service')?->count ?? 0);
             $totalCostUsd = (float) ($messagesQuery()->sum('cost_usd') ?? 0.00);
-        } else {
-            // Standard Meta Graph API conversation rates
-            $totalOutbound = $messagesQuery()->where('direction', 'outbound')->count();
-            $totalInbound = $messagesQuery()->where('direction', 'inbound')->count();
-
-            $marketingCount = $totalOutbound;
-            $marketingCost = $marketingCount * 0.025;
-            $authCount = 0;
-            $authCost = 0.00;
-            $utilityCount = 0;
-            $utilityCost = 0.00;
-            $serviceCount = $totalInbound;
-            $totalCostUsd = $marketingCost + $utilityCost;
         }
 
         $totalSentOutbound = $messagesQuery()->where('direction', 'outbound')->count();
@@ -134,17 +95,17 @@ class DashboardController extends Controller
             ->whereIn('status', ['delivered', 'read'])
             ->count();
 
-        $deliveryRate = $totalSentOutbound > 0 ? round(($totalDelivered / $totalSentOutbound) * 100, 1) : 100.0;
+        $deliveryRate = $totalSentOutbound > 0 ? round(($totalDelivered / $totalSentOutbound) * 100, 1) : null;
         $totalReceivedInbound = $messagesQuery()->where('direction', 'inbound')->count();
         $totalFailed = $messagesQuery()->where('status', 'failed')->count();
 
         $aiResolvedCount = $threadsQuery()->where('bot_active', true)->where('status', 'resolved')->count();
         $totalClosedThreads = $threadsQuery()->whereIn('status', ['resolved', 'closed'])->count();
-        $resolutionRate = $totalClosedThreads > 0 ? round(($aiResolvedCount / $totalClosedThreads) * 100, 1) : 94.2;
+        $resolutionRate = $totalClosedThreads > 0 ? round(($aiResolvedCount / $totalClosedThreads) * 100, 1) : null;
 
         $avgLatencyMs = $messagesQuery()
             ->whereNotNull('latency_ms')
-            ->avg('latency_ms') ?? 420;
+            ->avg('latency_ms');
 
         // 5. 7-Day Trend Series (Every day guaranteed)
         $sevenDaysAgo = Carbon::now()->subDays(6)->startOfDay();
@@ -193,7 +154,7 @@ class DashboardController extends Controller
             ->count();
 
         // 7. Recent Campaigns
-        $recentCampaigns = Campaign::where('tenant_id', (string) $tenantId)
+        $recentCampaigns = Campaign::where('tenant_id', $tenantId)
             ->latest()
             ->take(3)
             ->get()
@@ -206,7 +167,6 @@ class DashboardController extends Controller
                     'sent_count' => (int) ($camp->sent_count ?? 0),
                     'delivered_count' => (int) ($camp->delivered_count ?? 0),
                     'target_count' => (int) ($camp->total_recipients ?? 0),
-                    'launch_id' => '#' . (1203345720000000000 + (int) $camp->id),
                     'created_at' => $camp->created_at?->diffForHumans() ?? 'Recently',
                 ];
             })
@@ -244,7 +204,7 @@ class DashboardController extends Controller
                     'bot_active' => (bool) $thread->bot_active,
                     'assigned_agent' => $thread->assignedUser?->name ?? 'Unassigned',
                     'intent_tag' => $intentTag,
-                    'last_message' => $latestMsg?->body ?? 'No message body',
+                    'last_message' => $latestMsg?->content ?? 'No message body',
                     'updated_at' => $thread->last_message_at?->diffForHumans() ?? $thread->updated_at?->diffForHumans() ?? 'Just now',
                     'contact' => [
                         'name' => $contact?->name ?? $contact?->full_name ?? ($contact?->phone_number ? $contact->phone_number : 'Customer #' . $thread->id),
@@ -332,9 +292,11 @@ class DashboardController extends Controller
             'failed' => $dsFailed,
             'pending' => $dsPending,
             'sent' => $dsSent,
-            'deliveryRate' => $dsTotal > 0 ? (int) round(($dsDelivered / $dsTotal) * 100) : 100,
+            'deliveryRate' => $dsTotal > 0 ? (int) round(($dsDelivered / $dsTotal) * 100) : null,
             'unresolvedRate' => $dsTotal > 0 ? (int) round((($dsFailed + $dsPending + $dsSent) / $dsTotal) * 100) : 0,
         ];
+
+        $money = fn (?float $amount) => $amount === null ? null : number_format($amount, 2);
 
         $pageProps = [
             'stats' => [
@@ -350,30 +312,34 @@ class DashboardController extends Controller
                     'connected' => $isWhatsappActive,
                     'status' => $isWhatsappActive ? 'active' : 'disconnected',
                     'display_number' => $isWhatsappActive ? ($whatsappChannel->account_identifier ?? $whatsappChannel->external_id) : null,
-                    'quality_rating' => $whatsappChannel?->quality_rating ?? 'GREEN',
+                    'quality_rating' => $whatsappChannel?->quality_rating,
                     'tier_limit' => $tierLimit,
                     'daily_sent' => $dailySent24h,
                     'consumption_pct' => $consumptionPercent,
+                    'profile_picture_url' => $isWhatsappActive ? $whatsappChannel->avatarUrl() : null,
                 ],
                 'instagram' => [
                     'connected' => $isInstagramActive,
                     'status' => $isInstagramActive ? 'active' : 'disconnected',
                     'username' => $isInstagramActive ? ($instagramChannel->account_identifier ?? $instagramChannel->account_name) : null,
+                    'profile_picture_url' => $isInstagramActive ? $instagramChannel->avatarUrl() : null,
                 ],
                 'messenger' => [
                     'connected' => $isMessengerActive,
                     'status' => $isMessengerActive ? 'active' : 'disconnected',
                     'page_name' => $isMessengerActive ? ($messengerChannel->account_name) : null,
+                    'profile_picture_url' => $isMessengerActive ? $messengerChannel->avatarUrl() : null,
                 ],
                 'campaigns_count' => $campaignsCount,
             ],
             'usage' => [
-                'marketing' => ['count' => $marketingCount, 'cost' => number_format($marketingCost, 2)],
-                'auth' => ['count' => $authCount, 'cost' => number_format($authCost, 2)],
-                'utility' => ['count' => $utilityCount, 'cost' => number_format($utilityCost, 2)],
-                'service' => ['count' => $serviceCount, 'cost' => '0.00'],
+                'tracked' => $costTracked,
+                'marketing' => ['count' => $marketingCount, 'cost' => $money($marketingCost)],
+                'auth' => ['count' => $authCount, 'cost' => $money($authCost)],
+                'utility' => ['count' => $utilityCount, 'cost' => $money($utilityCost)],
+                'service' => ['count' => $serviceCount, 'cost' => $costTracked ? '0.00' : null],
                 'total_sent' => $totalSentOutbound,
-                'total_cost_usd' => number_format($totalCostUsd, 2),
+                'total_cost_usd' => $money($totalCostUsd),
             ],
             'telemetry' => [
                 'total_contacts' => $totalContacts,
@@ -382,7 +348,7 @@ class DashboardController extends Controller
                 'total_delivered' => $totalDelivered,
                 'delivery_rate' => $deliveryRate,
                 'total_inbound' => $totalReceivedInbound,
-                'avg_latency_ms' => (int) round($avgLatencyMs),
+                'avg_latency_ms' => $avgLatencyMs === null ? null : (int) round($avgLatencyMs),
                 'total_failed' => $totalFailed,
                 'resolution_rate' => $resolutionRate,
                 'qualified_leads' => $qualifiedLeads,

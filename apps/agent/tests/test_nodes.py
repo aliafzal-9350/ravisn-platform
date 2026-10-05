@@ -40,7 +40,8 @@ async def test_router_human_trigger():
     }
     result = await router_node(state)
     assert result["intent"] == "human_escalation"
-    assert result["telemetry"]["confidence_score"] >= 0.95
+    # Keyword routing has no real confidence to report, so none is invented.
+    assert "confidence_score" not in result["telemetry"]
 
 
 @pytest.mark.asyncio

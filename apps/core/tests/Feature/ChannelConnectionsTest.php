@@ -4,6 +4,7 @@ use App\Models\ChannelIdentity;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia;
 
 uses(RefreshDatabase::class);
@@ -42,6 +43,7 @@ test('channel connections hub defaults to clean disconnected state when no chann
 
 test('channel connections page renders correctly with dynamic channel data', function () {
     ChannelIdentity::create([
+        'tenant_id' => $this->tenant->id,
         'channel_type' => 'whatsapp',
         'account_name' => '+1 564-222-6889',
         'external_id' => '5647382910842',
@@ -76,6 +78,16 @@ test('channel connections page renders correctly with dynamic channel data', fun
 });
 
 test('manual waba linkup upserts channel identity record and sets status active', function () {
+    Http::fake([
+        'graph.facebook.com/*' => Http::response([
+            'id' => '5647382910842',
+            'display_phone_number' => '+1 564-222-6889',
+            'verified_name' => 'RAVISN Technologies',
+            'quality_rating' => 'YELLOW',
+            'messaging_limit_tier' => 'TIER_1K',
+        ], 200),
+    ]);
+
     $response = $this->actingAs($this->user)
         ->post(route('client.connect.manual-link.whatsapp'), [
             'display_phone_number' => '+1 564-222-6889',
@@ -93,6 +105,45 @@ test('manual waba linkup upserts channel identity record and sets status active'
         'business_account_id' => '1092837465019',
         'is_active' => true,
     ]);
+
+    // What the hub shows comes from Meta, not optimistic defaults.
+    $settings = ChannelIdentity::where('external_id', '5647382910842')->first()->settings;
+    expect($settings['quality_rating'])->toBe('YELLOW')
+        ->and($settings['messaging_limit'])->toBe('TIER_1K')
+        ->and($settings['status'])->toBe('Connected');
+});
+
+test('manual waba linkup is refused when Meta rejects the token', function () {
+    Http::fake([
+        'graph.facebook.com/*' => Http::response(['error' => ['message' => 'Invalid OAuth access token']], 401),
+    ]);
+
+    $this->actingAs($this->user)
+        ->post(route('client.connect.manual-link.whatsapp'), [
+            'waba_id' => '1092837465019',
+            'phone_number_id' => '5647382910842',
+            'system_user_token' => 'EAAG_revoked_token',
+        ])
+        ->assertRedirect();
+
+    // This file runs without the session middleware, so read the flashed bag directly.
+    expect(session('errors')?->has('system_user_token'))->toBeTrue();
+
+    $this->assertDatabaseMissing('channel_identities', ['external_id' => '5647382910842']);
+});
+
+test('manual waba linkup requires an access token', function () {
+    $this->actingAs($this->user)
+        ->post(route('client.connect.manual-link.whatsapp'), [
+            'waba_id' => '1092837465019',
+            'phone_number_id' => '5647382910842',
+        ])
+        ->assertRedirect();
+
+    // This file runs without the session middleware, so read the flashed bag directly.
+    expect(session('errors')?->has('system_user_token'))->toBeTrue();
+
+    $this->assertDatabaseMissing('channel_identities', ['external_id' => '5647382910842']);
 });
 
 test('sync endpoint triggers without error and returns success', function () {
@@ -119,6 +170,7 @@ test('test ping endpoint dispatches successfully', function () {
 
 test('channel can be disconnected', function () {
     $channel = ChannelIdentity::create([
+        'tenant_id' => $this->tenant->id,
         'channel_type' => 'instagram',
         'account_name' => 'ravisn.ai',
         'external_id' => '9988776655443',

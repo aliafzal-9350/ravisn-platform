@@ -115,18 +115,25 @@ test('campaign completed with failures creates a system notification', function 
     ]);
 
     $whatsAppApi = $this->mock(WhatsAppCloudApi::class);
+    $whatsAppApi->shouldReceive('withToken')->andReturnSelf();
     $whatsAppApi->shouldReceive('sendTextMessage')
         ->once()
         ->andThrow(new Exception('Network error'));
 
-    // Run the job which will catch the error, update status to failed, and trigger completion check
+    // A network error is retried by the queue; once retries run out the queue
+    // calls failed(), which records the failure and completes the campaign.
     $job = new SendCampaignMessage($campaign, $recipient);
-    $job->tries = 1;
-    $job->handle($whatsAppApi);
+    try {
+        $job->handle($whatsAppApi);
+    } catch (Exception $e) {
+        $job->failed($e);
+    }
+
+    expect($recipient->fresh()->status)->toBe('failed');
 
     $this->assertDatabaseHas('system_notifications', [
         'tenant_id' => $this->tenant->id,
-        'title' => 'فشل جزئي أو كلي في إرسال الحملة',
+        'title' => 'Campaign finished with failed messages',
         'type' => 'error',
     ]);
 

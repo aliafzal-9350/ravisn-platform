@@ -31,12 +31,18 @@ class ThreadUpdatedEvent implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        $channels = [
-            new PrivateChannel('crm.inbox'),
-        ];
+        $channels = [];
 
         if ($this->threadId) {
             $channels[] = new PrivateChannel('chat.thread.' . $this->threadId);
+        }
+
+        $tenantId = $this->thread instanceof Thread
+            ? $this->thread->tenantId()
+            : ($this->thread['tenant_id'] ?? null);
+
+        if ($tenantId) {
+            $channels[] = new PrivateChannel('tenant.' . $tenantId . '.inbox');
         }
 
         return $channels;

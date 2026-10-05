@@ -1,0 +1,21 @@
+{
+    "//": "Canonical source of truth for human-escalation/sentiment keyword patterns. DO NOT EDIT the copies in apps/core/resources/data or apps/agent/src/data directly — edit this file, then run scripts/sync-escalation-keywords.sh to propagate.",
+    "version": 1,
+    "human_request_patterns": [
+        "talk to (a )?(human|person|agent|representative|specialist|manager|supervisor)",
+        "speak (with|to) (a )?(human|person|agent|representative|manager|someone)",
+        "get me (a )?(human|person|agent|manager|someone real)",
+        "connect (me )?(with|to) (a )?(human|person|agent|live support)",
+        "real (human|person)|human agent|live agent|operator|representative",
+        "escalate|complaint|file a complaint",
+        "call me|insan se baat|bande se baat"
+    ],
+    "frustration_patterns": [
+        "angry|furious|livid|enraged|pissed(\\s+off)?",
+        "terrible|horrible|worst(\\s+(service|support|bot|company))?|awful|pathetic|disaster",
+        "unacceptable|ridiculous|disgusted|hate this|waste of (my )?time",
+        "scam|fraud|cheater|thief|robbery|ripoff|rip-off",
+        "sue|lawyer|attorney|legal action|court|police",
+        "useless bot|stupid bot|dumb bot|idiot bot|stop replying bot|shut up"
+    ]
+}

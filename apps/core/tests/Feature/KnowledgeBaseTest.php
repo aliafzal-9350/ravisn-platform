@@ -2,11 +2,13 @@
 
 use App\Models\KnowledgeBase;
 use App\Models\KnowledgeChunk;
+use App\Models\Tenant;
 use App\Models\User;
+use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
 
 test('authenticated user can view knowledge base page', function () {
-    $user = User::first() ?? User::factory()->create();
+    $user = User::factory()->for(Tenant::factory())->create();
 
     $this->actingAs($user)
         ->get('/dashboard/knowledge')
@@ -19,7 +21,11 @@ test('authenticated user can view knowledge base page', function () {
 });
 
 test('authenticated user can store and retrieve a qa knowledge entry', function () {
-    $user = User::first() ?? User::factory()->create();
+    Http::fake([
+        '*/api/v1/knowledge/embed' => Http::response(['embedding' => array_fill(0, 1536, 0.01)], 200),
+    ]);
+
+    $user = User::factory()->for(Tenant::factory())->create();
 
     $response = $this->actingAs($user)
         ->postJson('/dashboard/knowledge/entry', [
@@ -42,11 +48,12 @@ test('authenticated user can store and retrieve a qa knowledge entry', function 
 });
 
 test('authenticated user can update a qa knowledge entry', function () {
-    $user = User::first() ?? User::factory()->create();
-    $kb = KnowledgeBase::firstOrCreate(
-        ['name' => 'RAVISN Enterprise Knowledge Base'],
-        ['embedding_model' => 'text-embedding-3-small', 'dimension' => 1536, 'is_active' => true]
-    );
+    Http::fake([
+        '*/api/v1/knowledge/embed' => Http::response(['embedding' => array_fill(0, 1536, 0.01)], 200),
+    ]);
+
+    $user = User::factory()->for(Tenant::factory())->create();
+    $kb = KnowledgeBase::forTenantOrCreate($user->tenant);
 
     $chunk = KnowledgeChunk::create([
         'knowledge_base_id' => $kb->id,
@@ -76,11 +83,8 @@ test('authenticated user can update a qa knowledge entry', function () {
 });
 
 test('authenticated user can delete a single qa knowledge entry', function () {
-    $user = User::first() ?? User::factory()->create();
-    $kb = KnowledgeBase::firstOrCreate(
-        ['name' => 'RAVISN Enterprise Knowledge Base'],
-        ['embedding_model' => 'text-embedding-3-small', 'dimension' => 1536, 'is_active' => true]
-    );
+    $user = User::factory()->for(Tenant::factory())->create();
+    $kb = KnowledgeBase::forTenantOrCreate($user->tenant);
 
     $chunk = KnowledgeChunk::create([
         'knowledge_base_id' => $kb->id,

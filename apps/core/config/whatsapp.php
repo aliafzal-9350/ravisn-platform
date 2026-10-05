@@ -57,6 +57,9 @@ return [
         'messages_per_second' => (int) env('WHATSAPP_RATE_LIMIT', 80),
         'batch_size' => (int) env('WHATSAPP_BATCH_SIZE', 50),
         'batch_delay_seconds' => (int) env('WHATSAPP_BATCH_DELAY', 2),
+        // How long a campaign message waits for a free send slot before it is
+        // put back on the queue.
+        'slot_wait_seconds' => (int) env('WHATSAPP_SLOT_WAIT', 10),
     ],
 
 ];

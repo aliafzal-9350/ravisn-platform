@@ -26,7 +26,15 @@ class WhatsappAccount extends Model
      */
     protected $keyType = 'string';
 
-
+    /**
+     * Meta credentials are never serialised to the browser or API responses.
+     *
+     * @var list<string>
+     */
+    protected $hidden = [
+        'access_token',
+        'app_secret',
+    ];
 
     /**
      * Get the attributes that should be cast.
@@ -39,6 +47,9 @@ class WhatsappAccount extends Model
             'id' => 'string',
             'tenant_id' => 'string',
             'verified_at' => 'datetime',
+            // Encrypted at rest with APP_KEY.
+            'access_token' => 'encrypted',
+            'app_secret' => 'encrypted',
         ];
     }
 

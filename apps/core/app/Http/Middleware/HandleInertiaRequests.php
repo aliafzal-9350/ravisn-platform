@@ -87,6 +87,7 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'auth' => [
                 'user' => $user,
+                'role' => $user?->workspaceRole(),
             ],
             'passkeysEnabled' => Features::enabled(Features::passkeys()),
             'whatsapp_app_id' => config('whatsapp.app_id', ''),

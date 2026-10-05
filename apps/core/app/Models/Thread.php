@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -32,6 +33,29 @@ class Thread extends Model
             'last_message_at' => 'datetime',
             'metadata' => 'array',
         ];
+    }
+
+    /**
+     * Restrict threads to those whose channel belongs to the given tenant.
+     * A null/empty tenant matches nothing, so an unscoped caller never sees data.
+     */
+    public function scopeForTenant(Builder $query, int|string|null $tenantId): Builder
+    {
+        if ($tenantId === null || $tenantId === '') {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas('channelIdentity', fn (Builder $channel) => $channel->where('tenant_id', (string) $tenantId));
+    }
+
+    /**
+     * The owning tenant: the channel's tenant, falling back to the contact's.
+     */
+    public function tenantId(): ?string
+    {
+        $tenantId = $this->channelIdentity?->tenant_id ?? $this->contact?->tenant_id;
+
+        return $tenantId === null ? null : (string) $tenantId;
     }
 
     public function contact(): BelongsTo

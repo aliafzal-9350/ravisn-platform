@@ -29,7 +29,7 @@ test('community dashboard pages render for a workspace user', function (string $
     'developer' => '/dashboard/developer',
 ]);
 
-test('community provisions a workspace for legacy users without one', function () {
+test('an account without a workspace is told to ask for an invitation, not given a workspace', function () {
     $user = User::factory()->create([
         'role' => 'legacy',
         'tenant_id' => null,
@@ -37,12 +37,8 @@ test('community provisions a workspace for legacy users without one', function (
 
     $this->actingAs($user)
         ->get('/dashboard')
-        ->assertOk();
+        ->assertForbidden();
 
-    $user->refresh();
-
-    expect($user->role)->toBe('client')
-        ->and($user->tenant_id)->not->toBeNull()
-        ->and($user->tenant)->not->toBeNull()
-        ->and($user->tenant->name)->toBe("{$user->name} Workspace");
+    expect($user->fresh()->tenant_id)->toBeNull()
+        ->and(\App\Models\Tenant::count())->toBe(0);
 });

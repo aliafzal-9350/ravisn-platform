@@ -161,7 +161,9 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // No public registration: RAVISN onboards each client itself, and
+        // people join a workspace through a team invitation. Re-enable this
+        // only together with billing and usage limits for self-serve signups.
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([

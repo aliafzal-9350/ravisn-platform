@@ -1,7 +1,7 @@
 import time
 import logging
 import httpx
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from src.config import settings
 
 logger = logging.getLogger(__name__)
@@ -15,15 +15,37 @@ class LLMFactory:
     4. Quaternary Engine: OpenAI (gpt-4o-mini / gpt-4o)
     """
 
+    @staticmethod
+    def chat_messages(system_prompt: str, user_query: str, history: Optional[List[Dict[str, str]]] = None) -> List[Dict[str, str]]:
+        """OpenAI-style messages: instructions, earlier turns, then the new message."""
+        return [
+            {"role": "system", "content": system_prompt},
+            *[{"role": turn["role"], "content": turn["content"]} for turn in (history or [])],
+            {"role": "user", "content": user_query},
+        ]
+
+    @staticmethod
+    def gemini_contents(system_prompt: str, user_query: str, history: Optional[List[Dict[str, str]]] = None) -> List[Dict[str, Any]]:
+        """Gemini contents: earlier turns ("model" for replies), then the new message."""
+        contents = [
+            {"role": "model" if turn["role"] == "assistant" else "user", "parts": [{"text": turn["content"]}]}
+            for turn in (history or [])
+        ]
+        contents.append({"role": "user", "parts": [{"text": f"System Context:\n{system_prompt}\n\nUser Query:\n{user_query}"}]})
+        return contents
+
     @classmethod
     async def generate_response(
         cls,
         system_prompt: str,
         user_query: str,
         temperature: float = 0.3,
-        max_tokens: int = 800
+        max_tokens: int = 800,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
+        """Reply to `user_query`, given the conversation so far (`history`, oldest first)."""
         start_time = time.time()
+        messages = cls.chat_messages(system_prompt, user_query, history)
 
         # 1. Primary Engine: Groq
         if settings.GROQ_API_KEY:
@@ -34,10 +56,7 @@ class LLMFactory:
 
                 resp = await client.chat.completions.create(
                     model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_query}
-                    ],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
@@ -54,7 +73,7 @@ class LLMFactory:
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "latency_ms": latency_ms,
-                    "confidence_score": 0.98
+                    "confidence_score": None
                 }
             except Exception as e:
                 logger.warning(f"[LLMFactory] Groq failed: {e}. Cascading to Gemini...")
@@ -65,12 +84,7 @@ class LLMFactory:
                 model_name = settings.GEMINI_CHAT_MODEL
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.GEMINI_API_KEY}"
                 payload = {
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [{"text": f"System Context:\n{system_prompt}\n\nUser Query:\n{user_query}"}]
-                        }
-                    ],
+                    "contents": cls.gemini_contents(system_prompt, user_query, history),
                     "generationConfig": {
                         "temperature": temperature,
                         "maxOutputTokens": max_tokens
@@ -94,7 +108,7 @@ class LLMFactory:
                                 "prompt_tokens": prompt_tokens,
                                 "completion_tokens": completion_tokens,
                                 "latency_ms": latency_ms,
-                                "confidence_score": 0.95
+                                "confidence_score": None
                             }
             except Exception as e:
                 logger.warning(f"[LLMFactory] Gemini failed: {e}. Cascading to xAI Grok...")
@@ -108,10 +122,7 @@ class LLMFactory:
 
                 resp = await client.chat.completions.create(
                     model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_query}
-                    ],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
@@ -128,7 +139,7 @@ class LLMFactory:
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "latency_ms": latency_ms,
-                    "confidence_score": 0.95
+                    "confidence_score": None
                 }
             except Exception as e:
                 logger.warning(f"[LLMFactory] xAI Grok failed: {e}. Cascading to OpenAI...")
@@ -142,10 +153,7 @@ class LLMFactory:
 
                 resp = await client.chat.completions.create(
                     model=model_name,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_query}
-                    ],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens
                 )
@@ -162,7 +170,7 @@ class LLMFactory:
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "latency_ms": latency_ms,
-                    "confidence_score": 0.95
+                    "confidence_score": None
                 }
             except Exception as e:
                 logger.error(f"[LLMFactory] OpenAI failed: {e}")
@@ -179,5 +187,5 @@ class LLMFactory:
             "prompt_tokens": len(system_prompt + user_query) // 4,
             "completion_tokens": len(fallback_reply) // 4,
             "latency_ms": latency_ms,
-            "confidence_score": 0.85
+            "confidence_score": None
         }
